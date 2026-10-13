@@ -71,8 +71,7 @@ this rule too, and the orchestrating session re-applies it before relaying anyth
 - **Say what is missing.** "Blocked — CI has not run since the last commit" is a
   complete report. Padding around a gap is not.
 
-**This block is replicated verbatim** in `~/.claude/CLAUDE.md`, in
-`~/Developer/CLAUDE.md`, in `~/Developer/scality/CLAUDE.md` and in the checked-in
+**This block is replicated verbatim** in `~/.claude/CLAUDE.md` and in the checked-in
 `CLAUDE.md` of every repo Stéphane owns, so teammates' sessions follow it too. Edit
 one, edit all.
 
