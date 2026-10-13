@@ -28,7 +28,9 @@ vi.mock("@/lib/cluster-refs", () => ({
 import {
   mediamtxListPaths,
   mediamtxPathStatus,
+  mediamtxAuthHeader,
   MEDIAMTX_API,
+  MEDIAMTX_MISSING_CREDENTIALS_WARNING,
 } from "@/lib/helpers/mediamtx";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -48,10 +50,13 @@ function errResponse(status: number): Response {
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
+  vi.stubEnv("CAMSIM_PASS", "s3cret-pass");
+  vi.stubEnv("MEDIAMTX_API_USER", "");
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -186,5 +191,60 @@ describe("mediamtxPathStatus", () => {
     expect(result.path).toBeNull();
     expect(result.warning).toMatch(/failed/i);
     expect(result.warning).toMatch(/timeout/);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Basic auth + missing credentials
+// ═════════════════════════════════════════════════════════════════════════════
+
+describe("mediamtx basic auth", () => {
+  const expected = `Basic ${Buffer.from("camsim:s3cret-pass").toString("base64")}`;
+
+  it("builds the header from user camsim and CAMSIM_PASS", () => {
+    expect(mediamtxAuthHeader()).toBe(expected);
+  });
+
+  it("MEDIAMTX_API_USER overrides the user", () => {
+    vi.stubEnv("MEDIAMTX_API_USER", "ops");
+    expect(mediamtxAuthHeader()).toBe(`Basic ${Buffer.from("ops:s3cret-pass").toString("base64")}`);
+  });
+
+  it("list sends the Authorization header", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(okResponse({ items: [] }));
+    await mediamtxListPaths();
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe(expected);
+  });
+
+  it("path status sends the Authorization header", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(okResponse({ name: "cam1", ready: true }));
+    await mediamtxPathStatus("cam1");
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe(expected);
+  });
+
+  it("missing CAMSIM_PASS: clear warning, no request made (list)", async () => {
+    vi.stubEnv("CAMSIM_PASS", "");
+    const result = await mediamtxListPaths();
+    expect(result.paths).toEqual([]);
+    expect(result.warning).toBe(MEDIAMTX_MISSING_CREDENTIALS_WARNING);
+    expect(result.warning).toMatch(/CAMSIM_PASS/);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("missing CAMSIM_PASS: clear warning, no request made (path status)", async () => {
+    vi.stubEnv("CAMSIM_PASS", "");
+    const result = await mediamtxPathStatus("cam1");
+    expect(result.path).toBeNull();
+    expect(result.warning).toBe(MEDIAMTX_MISSING_CREDENTIALS_WARNING);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("401 names the credentials, never the password", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(errResponse(401));
+    const result = await mediamtxListPaths();
+    expect(result.warning).toMatch(/rejected the camsim credentials/);
+    expect(result.warning).not.toContain("s3cret-pass");
   });
 });

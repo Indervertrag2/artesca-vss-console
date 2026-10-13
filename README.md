@@ -66,10 +66,17 @@ kubectl apply -k k8s/
 Three things that kustomization will not do for you, and each stops the pod:
 
 - **`images.newTag` points at the private GHCR package.** Override it with the image you built (`kustomize edit set image`, or a patch).
-- **The Secrets must exist first.** `console-auth` carries `CONSOLE_PASSWORD` + `AUTH_SECRET` — Auth.js reads `AUTH_SECRET`, and a Secret carrying only the `NEXTAUTH_`-prefixed spelling leaves the pod refusing every request while `src/instrumentation.ts` logs `missing env vars: AUTH_SECRET`. `console-ssh` carries the camera-sim PEM. Object-store credentials are **not** here — they come from the `objectstore-creds` Secret, remapped to `OBJECTSTORE_*` in `k8s/20-console.yaml`.
+- **The Secrets must exist first.** `console-auth` carries `CONSOLE_PASSWORD`, `AUTH_SECRET` and `CAMSIM_PASS` (see "Camera-sim API credentials" below) — Auth.js reads `AUTH_SECRET`, and a Secret carrying only the `NEXTAUTH_`-prefixed spelling leaves the pod refusing every request while `src/instrumentation.ts` logs `missing env vars: AUTH_SECRET`. `console-ssh` carries the camera-sim PEM. Object-store credentials are **not** here — they come from the `objectstore-creds` Secret, remapped to `OBJECTSTORE_*` in `k8s/20-console.yaml`.
 - **`30-test-footage.yaml` is not optional**, despite being a feature: `20-console.yaml` mounts the PVC it declares, and Kubernetes has no optional PVC volume, so the pod does not schedule without it.
 
 The console also needs a `console-writer` Role and RoleBinding in each namespace it patches, since it reads pods and patches ConfigMaps outside its own namespace. `01-rbac.yaml` covers namespace `console`; grant the equivalent in each `vss-<profile>` namespace you point it at.
+
+## Camera-sim API credentials
+
+The camera-sim's mediamtx API (`:9997`) requires HTTP basic auth. The console sends user `camsim` (override with `MEDIAMTX_API_USER`) and the password in `CAMSIM_PASS`, read from the `console-auth` Secret through `envFrom`; it is never committed or logged. With `CAMSIM_PASS` unset, `/cameras` and the topology report "mediamtx API credentials missing" instead of an empty camera list; a 401/403 reports "rejected the camsim credentials".
+
+- **Get the password.** The camera-sim VM generates it at first boot into `/opt/camera-sim/.env` (mode 0600). Read it over SSH: `sudo sed -n 's/^CAMSIM_PASS=//p' /opt/camera-sim/.env`. Put it in `k8s/10-secrets.yaml.example`'s `console-auth` copy and re-apply; restart the console pod, since `envFrom` is read at start.
+- **Reachability.** On GCP the VM opens only `:8554` (anonymous RTSP read) to the world; `:9997`, `:8080` and `:22` accept only the admin range, which is Google's IAP range (`35.235.240.0/20`) by default. A console pod's egress IP is not in that range, so the API is unreachable from the cluster until the VM is launched with the box's egress address as its admin source. The other fix is a tunnel from the operator machine, which a pod cannot use.
 
 ## Sharing the box with the AI Factory
 

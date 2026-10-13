@@ -78,6 +78,8 @@ data:
   # mediamtx REST API base URL (port 9997 on the camera-sim host).
   # Defaults to http://<CAMERA_SIM_HOST>:9997 if not set.
   # MEDIAMTX_API_URL: "http://<camera-sim-public-ip>:9997"
+  # The API needs basic auth: user `camsim` (MEDIAMTX_API_USER to override), password
+  # CAMSIM_PASS from the console-auth Secret (k8s/10-secrets.yaml.example).
 
   # ── Alert worker ─────────────────────────────────────────────────────────────
   # Helm: vss-video-analytics-api.<vss-ns>.svc.cluster.local:9101
