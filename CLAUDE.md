@@ -17,23 +17,25 @@ subagents (Agent tool), which return a summary rather than file dumps.
 - **Delegate by default** whenever a task means reading several files, sweeping the
   codebase, implementing, running long gates, or reviewing. Work directly only for a
   single-fact lookup or a one-line edit where the file and change are already known.
-- **Pick the model and the effort by task.** Effort
-  matters as much as the model on the current generation; set both. On Stéphane's laptop
-  the agent types in `~/.claude/agents/` fix both — choose the type, not a `model`:
+- **Pick the model and the effort by task. The default is Opus at effort `medium`.**
+  On Stéphane's laptop the agent types in `~/.claude/agents/` fix both — choose the
+  type, not a `model`:
   - **`mechanic`** — Sonnet 5.5, effort `medium`: work whose target is already stated —
     searches, enumeration, edits the tests pin, running gates, doc updates.
-  - **`researcher`** — Opus 5.5, effort `high`: reading across repos and sources and
+  - **`researcher`** — Opus 5.5, effort `medium`: reading across repos and sources and
     writing findings with citations.
-  - **`builder`** — Opus 5.5, effort `xhigh`: design, implementation, debugging,
+  - **`builder`** — Opus 5.5, effort `medium`: design, implementation, debugging,
     anything that moves a figure or classifies.
-  - **`verifier`** — Fable 5.1, effort `xhigh`, no write tools: once per deliverable, at
-    the end — adversarial review, cross-checking drafts, synthesis across many results,
-    security-sensitive or schema/production-affecting changes. One Fable pass at the end
-    beats Fable on every step. Measured 2026-10-01 on the ISV handler work: two Fable
-    passes found 13 contradictions across seven Opus drafts and 8 defects the Opus
-    builders had missed, one of them a check that could never fail.
-  - Raise effort before changing model, and judge cost per finished task, not per
-    request: a cheaper agent that needs a rework pass costs more.
+  - **`builder-high`** — Opus 5.5, effort `high`: a builder task that failed at medium.
+  - **`verifier`** — Opus 5.5, effort `high`, no write tools: once per deliverable, at
+    the end, never once per lane or per step — adversarial review, cross-checking
+    drafts, security-sensitive or schema/production-affecting changes.
+  - **No agent type runs on Fable, and `~/.claude/settings.json` excludes it**
+    (`availableModels`) and caps effort at `high` (`maxEffortLevel`). Measured from
+    local transcripts, 2026-10-08 to 10-18: `verifier` on Fable ran 5–8 passes per lane
+    (1,495 calls on 10-15), and `builder` at `xhigh` was about 65% of estimated spend.
+  - Raise effort only after a task has failed at medium, and judge cost per finished
+    task, not per request.
 - **A subagent does the work itself and never spawns another subagent.** Delegation is
   the orchestrating session's job; one level deep is the whole design. If a subagent
   judges the task needs a stronger model, it says so and stops — it does not launch
