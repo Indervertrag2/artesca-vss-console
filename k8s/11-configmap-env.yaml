@@ -242,7 +242,10 @@ data:
   # Absent ConfigMap or namespace = `vss`. console-reader's cluster-wide
   # configmaps `get` covers the read (01-rbac.yaml).
   # AI_FACTORY_URL: link to the AI Factory UI as the operator's browser reaches
-  #   it (banner + nav). Default http://localhost:4090, the AI Factory tunnel.
-  # AI_FACTORY_URL: "http://localhost:4090"
+  #   it (nav, pause banner, kiosk notice). No default: unset, or anything but
+  #   an absolute http(s) URL, renders no AI Factory link at all, so set it only
+  #   where the operators can open that address (e.g. the laptop end of the
+  #   AI Factory's SSH tunnel). The pause banner shows either way.
+  # AI_FACTORY_URL: "http://<host-the-operators-reach>:<port>"
   # AI_FACTORY_NAMESPACE: "ai-factory"
   # AI_FACTORY_MODE_CONFIGMAP: "gpu-mode"
