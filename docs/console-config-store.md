@@ -89,6 +89,10 @@ A file that is absent means a fresh instance, and reads as empty — the same an
 
 A file that exists and does not parse, or whose shape is wrong, **throws**. Reading it as empty would present a configured instance as a blank one, and the reconciler would then converge the cluster onto nothing. Validation checks structure, not membership: an entity list must be a list of mappings each carrying a string `id`, and unknown fields pass through untouched, so a newer console's extra field does not make the store unreadable to an older pod.
 
+## Filling an emptied store from a copy
+
+`GET /api/config-store/export` answers the instance's cameras, scenarios, prompt sets and active prompt id; `POST /api/config-store/restore` takes that body back and fills **only the lists that are empty**, under the same lock as every other write, so a list that holds anything is never overwritten. A copy whose `instance` is not this console's is refused, and so is any entry the normal routes would not have written (strict schemas in `src/lib/config-store/fill.ts`). The AI Factory's GPU switch uses the pair to bring back a store found emptied (README "Sharing the box with the AI Factory"). File store only.
+
 ## The Firestore SDK is an optional install
 
 `@google-cloud/firestore` is in no dependency field. Not for licensing reasons — it is Apache-2.0 — but because the default backend is a file, and a default clone would otherwise pull a GCP client library, gRPC and protobufjs to run code paths it never reaches. Measured: **208 packages, 133 → 49 in the production tree.**

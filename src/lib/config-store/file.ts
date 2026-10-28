@@ -4,6 +4,7 @@ import { promises as fs } from "fs";
 import { hostname } from "os";
 import path from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { planFill, type FillResult, type FillSource } from "@/lib/config-store/fill";
 
 import type {
   ConfigStore,
@@ -404,6 +405,27 @@ export class FileConfigStore implements ConfigStore {
   async setActivePromptId(instance: string, id: string, updatedBy: string): Promise<void> {
     await this.mutate(instance, updatedBy, (doc) => {
       doc.activePromptId = id;
+    });
+  }
+
+  /**
+   * Fill each empty list from `src` and touch nothing else (`fill.ts` planFill), the
+   * check and the write under one hold of the lock. A fill that restores nothing
+   * leaves the file as it is, unwritten.
+   */
+  async fillEmpty(instance: string, src: FillSource, updatedBy: string): Promise<FillResult> {
+    const file = this.file(instance);
+    return withFileLock(file, async () => {
+      const doc = await this.read(instance);
+      const { next, ...result } = planFill(doc, src);
+      if (result.restored.length === 0) return result;
+      const s = stamp(updatedBy);
+      for (const key of result.restored) doc[key] = (next[key] ?? []).map((e) => ({ ...e, ...s }));
+      if (next.activePromptId) doc.activePromptId = next.activePromptId;
+      doc.updatedBy = updatedBy;
+      doc.updatedAt = s.updatedAt;
+      await writeDocAtomic(file, doc);
+      return result;
     });
   }
 }
