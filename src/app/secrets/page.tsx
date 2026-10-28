@@ -26,7 +26,6 @@ const SECRET_KEYS: Array<{ key: string; label: string; multiField?: boolean }> =
   { key: "slack-webhook-url", label: "Slack Webhook URL" },
   { key: "console-auth-password", label: "Console Auth Password" },
   { key: "camera-sim-ssh-key", label: "Camera-sim SSH Key (PEM)" },
-  { key: "aws-creds", label: "AWS Credentials", multiField: true },
 ];
 
 const NAG_THRESHOLD_MS = 90 * 24 * 60 * 60 * 1000;
