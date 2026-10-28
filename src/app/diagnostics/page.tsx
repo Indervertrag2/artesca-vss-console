@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { redirect } from "next/navigation";
 import { useKiosk } from "@/components/KioskProvider";
 import { Shell } from "@/components/Shell";
@@ -80,18 +80,6 @@ export default function DiagnosticsPage() {
   const [running, setRunning] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState<{ id: string; label: string } | null>(null);
   const { toast } = useToast();
-
-  useEffect(() => {
-    // Load last 20 runs from API
-    fetch("/api/diagnostics")
-      .then((r) => r.json())
-      .then((data: RunRecord[]) => {
-        const map = new Map<string, RunRecord>();
-        for (const r of data) map.set(r.testId, r);
-        setRuns(map);
-      })
-      .catch(() => {});
-  }, []);
 
   async function runTest(id: string) {
     setRunning((s) => new Set(s).add(id));
