@@ -17,32 +17,32 @@ const AVAILABLE_TESTS: Array<{ id: string; label: string; description: string }>
     description: "Runs scripts/validate-manifests.sh — checks all k8s YAML for correctness.",
   },
   {
-    id: "smoke-phase1",
+    id: "phase-smoke-1",
     label: "Phase 1 smoke test",
     description: "ARTESCA storage reachability + VST pod health.",
   },
   {
-    id: "smoke-phase2",
+    id: "phase-smoke-2",
     label: "Phase 2 smoke test",
     description: "Camera-sim RTSP paths + mediamtx path list.",
   },
   {
-    id: "smoke-phase3",
+    id: "phase-smoke-3",
     label: "Phase 3 smoke test",
     description: "VLM (vss-rtvi-vlm) liveness + NIM /health probe.",
   },
   {
-    id: "smoke-phase4",
+    id: "phase-smoke-4",
     label: "Phase 4 smoke test",
     description: "Kafka topic existence + consumer group lag.",
   },
   {
-    id: "smoke-phase5",
+    id: "phase-smoke-5",
     label: "Phase 5 smoke test",
     description: "Alert worker Redis connectivity + scenario processing.",
   },
   {
-    id: "kubectl-events",
+    id: "get-events",
     label: "kubectl get events -A",
     description: "Cluster-wide events — surfaces recent warnings or errors.",
   },
@@ -97,12 +97,13 @@ export default function DiagnosticsPage() {
     setRunning((s) => new Set(s).add(id));
     try {
       const res = await fetch(`/api/diagnostics/${id}`, { method: "POST" });
+      // The route answers { exitCode, stdout, stderr }, or { error } on a 4xx/5xx.
       const data = await res.json();
       const record: RunRecord = {
         testId: id,
         lastRun: new Date().toISOString(),
-        lastResult: data.exit === 0 ? "pass" : "fail",
-        output: data.output ?? "",
+        lastResult: res.ok && data.exitCode === 0 ? "pass" : "fail",
+        output: [data.stdout, data.stderr, data.error].filter(Boolean).join("\n"),
       };
       setRuns((m) => new Map(m).set(id, record));
       toast({
