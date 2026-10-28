@@ -196,10 +196,10 @@ Draws the operator surface: the 22 pages by what kiosk mode does to each, the co
 
 ⚠ **The import walk follows `await import()` as well as `from`.** The reconcile context is reached dynamically at all 16 of its call sites, so a static-only walk concludes that no route touches the config store — which is exactly backwards, since that path is how cameras, prompt and scenarios are written.
 
-Two things the walk surfaces, both still open:
+Two things the walk surfaced:
 
-- **Four nav links break in kiosk mode.** `/search`, `/analytics`, `/evidence` and `/storage` are in neither `KIOSK_HIDDEN_ROUTES` nor `KIOSK_ALLOWED_ROUTES`. `Nav.tsx` filters only the hidden list so the links render; [`proxy.ts`](src/proxy.ts) serves only the allowed list so the paths redirect to `/`. A showroom visitor clicks and lands back on the overview. Whichever list they belong in, they belong in one.
-- **Seven mutating routes outlive their own page.** `proxy.ts` states that "mutating API routes are already guarded by `rejectIfKiosk()` in each handler", and 17 of 33 are. The other 16 include seven under a page kiosk hides — `/api/cameras/[id]` (PUT/PATCH/DELETE), `/api/cameras/[id]/restart`, the three `sync-gcs` routes and `/api/diagnostics/[test]`. `/api/cameras/[id]` DELETE is the sharpest: the sibling collection route `/api/cameras` POST *does* guard, so the asymmetry is within one resource. `/api/settings/kiosk` is exempt by design and named as such in the dumper — it is the exit from kiosk mode, and guarding it would trap the session.
+- **Every nav page is in exactly one kiosk list** (`tests/unit/kiosk.test.ts` pins it). [`proxy.ts`](src/proxy.ts) redirects a page in neither to `/`, even when a kiosk page links to it: the overview hero's storage tile (`/storage`) and chat's search thumbnails (`/search?q=`) did, until `/evidence` went to the hidden list (Seal writes WORM objects and its route has no `rejectIfKiosk`) and `/search`, `/analytics` and `/storage` to the allowed one. The `/kvcache` explainer's `/evidence` link still leads to `/` in kiosk mode.
+- **Still open: seven mutating routes outlive their own page.** `proxy.ts` states that "mutating API routes are already guarded by `rejectIfKiosk()` in each handler", and 17 of 33 are. The other 16 include seven under a page kiosk hides — `/api/cameras/[id]` (PUT/PATCH/DELETE), `/api/cameras/[id]/restart`, the three `sync-gcs` routes and `/api/diagnostics/[test]`. `/api/cameras/[id]` DELETE is the sharpest: the sibling collection route `/api/cameras` POST *does* guard, so the asymmetry is within one resource. `/api/settings/kiosk` is exempt by design and named as such in the dumper — it is the exit from kiosk mode, and guarding it would trap the session.
 
 ## Issue tracking — GitHub, not Jira
 
