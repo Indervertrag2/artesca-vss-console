@@ -799,6 +799,10 @@ export const CLUSTER = {
     url: VSS_AGENT_URL,
     /** Host:port prefix the agent stamps into snapshot/clip URLs (browser-unreachable as-is). */
     mediaHost: VSS_AGENT_MEDIA_HOST,
+    /** Where an operator's browser reaches the upstream VSS agent UI (/chat's
+     *  "open upstream UI"); null = no button. No default: it is often a
+     *  ClusterIP service that no operator's browser reaches. */
+    uiUrl: browserLink(process.env.VSS_AGENT_UI_URL),
     /** ConfigMap holding the agent's runtime config (workflow.prompt, workflow.max_iterations).
      *  Override via AGENT_CONFIG_MAP env if the Helm chart changes the name. */
     configMap: process.env.AGENT_CONFIG_MAP ?? "vss-agent-config",
