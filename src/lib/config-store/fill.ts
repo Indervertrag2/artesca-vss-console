@@ -12,7 +12,9 @@
  * Pure: `FileConfigStore.fillEmpty` runs it under the file's cross-process lock,
  * so the emptiness check and the write are one step.
  */
+import { z } from "zod";
 import { CONFIG_SCHEMA } from "@/lib/config-store/file";
+import { CAMERA_ID_RE, CameraRecordingSchema, RTSP_URL_RE } from "@/lib/schemas";
 
 export const FILL_LISTS = ["cameras", "scenarios", "promptSets"] as const;
 export type FillList = (typeof FILL_LISTS)[number];
@@ -35,6 +37,58 @@ export interface FillResult {
   /** Whether `activePromptId` was set (only with the prompt sets it names, and only when unset). */
   activePromptId: boolean;
 }
+
+/**
+ * Each entry, field by field, as the store holds it and as the normal routes would have written it: the camera id
+ * and RTSP rule of POST /api/cameras, the scenario fields of the stored ScenarioEntry, the prompt set of PATCH
+ * /api/prompt. Every object is strict: an unknown field is refused, so a restore cannot plant a field or a URL the
+ * reconcile loop would act on that no route accepts. The store's own stamps (`updatedBy`, `updatedAt`) are accepted
+ * and replaced by the restore's.
+ */
+const STAMPS = { updatedBy: z.string().max(256).optional(), updatedAt: z.string().max(64).optional() };
+const ENTRY_ID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/);
+const SHORT = z.string().max(512);
+
+export const FillCameraSchema = z
+  .object({
+    id: z.string().regex(CAMERA_ID_RE),
+    rtspUrl: z.string().max(2048).regex(RTSP_URL_RE),
+    description: SHORT.optional(),
+    role: z.string().max(64).optional(),
+    scenarioIds: z.array(ENTRY_ID).max(FILL_MAX_ENTRIES).optional(),
+    promptId: ENTRY_ID.optional(),
+    recording: CameraRecordingSchema.strict().optional(),
+    ...STAMPS,
+  })
+  .strict();
+
+export const FillScenarioSchema = z
+  .object({
+    id: ENTRY_ID,
+    name: z.string().min(1).max(200),
+    description: z.string().max(4096).optional(),
+    severity: z.enum(["low", "medium", "high", "critical"]),
+    channels: z.array(z.enum(["ui", "slack"])).max(2),
+    sensor_filter: z.string().max(2048),
+    keywords: z.array(z.string().max(200)).max(256),
+    enabled: z.boolean(),
+    cooldown_seconds: z.number().int().nonnegative().max(86400).optional(),
+    ...STAMPS,
+  })
+  .strict();
+
+export const FillPromptSetSchema = z
+  .object({
+    id: ENTRY_ID,
+    name: z.string().min(1).max(200),
+    text: z.string().max(65536),
+    model: z.string().max(256).optional(),
+    alertType: z.string().max(128).optional(),
+    ...STAMPS,
+  })
+  .strict();
+
+const ENTRY_SCHEMA: Record<FillList, z.ZodTypeAny> = { cameras: FillCameraSchema, scenarios: FillScenarioSchema, promptSets: FillPromptSetSchema };
 
 export class FillError extends Error {
   constructor(message: string) {
@@ -67,10 +121,18 @@ export function parseFillSource(raw: unknown, instance: string): FillSource {
     const ids = new Set<string>();
     return v.map((e, i) => {
       if (!isObj(e)) throw new FillError(`body: ${key}[${i}] must be an object`);
-      if (typeof e.id !== "string" || !e.id) throw new FillError(`body: ${key}[${i}] has no string id`);
-      if (ids.has(e.id)) throw new FillError(`body: ${key} holds id ${JSON.stringify(e.id)} twice`);
-      ids.add(e.id);
-      return { ...e };
+      const parsed = ENTRY_SCHEMA[key].safeParse(e);
+      if (!parsed.success) {
+        const issue = parsed.error.issues[0];
+        throw new FillError(`body: ${key}[${i}]${issue.path.length ? "." + issue.path.join(".") : ""}: ${issue.message}`);
+      }
+      const { updatedBy: _by, updatedAt: _at, ...entry } = parsed.data as Record<string, unknown>;
+      void _by;
+      void _at;
+      const id = entry.id as string;
+      if (ids.has(id)) throw new FillError(`body: ${key} holds id ${JSON.stringify(id)} twice`);
+      ids.add(id);
+      return entry;
     });
   };
   const active = raw.activePromptId;

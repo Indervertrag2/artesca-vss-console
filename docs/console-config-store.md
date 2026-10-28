@@ -91,7 +91,7 @@ A file that exists and does not parse, or whose shape is wrong, **throws**. Read
 
 ## Filling an emptied store from a copy
 
-`GET /api/config-store/export` answers the instance's cameras, scenarios, prompt sets and active prompt id; `POST /api/config-store/restore` takes that body back and fills **only the lists that are empty**, under the same lock as every other write, so a list that holds anything is never overwritten. A copy whose `instance` is not this console's is refused. The AI Factory's GPU switch uses the pair to bring back a store found emptied (README "Sharing the box with the AI Factory"). File store only.
+`GET /api/config-store/export` answers the instance's cameras, scenarios, prompt sets and active prompt id; `POST /api/config-store/restore` takes that body back and fills **only the lists that are empty**, under the same lock as every other write, so a list that holds anything is never overwritten. A copy whose `instance` is not this console's is refused, and so is any entry the normal routes would not have written (strict schemas in `src/lib/config-store/fill.ts`). The AI Factory's GPU switch uses the pair to bring back a store found emptied (README "Sharing the box with the AI Factory"). File store only.
 
 ## The Firestore SDK is an optional install
 

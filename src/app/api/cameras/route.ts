@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { z } from "zod";
+import { CAMERA_ID_RE, RTSP_URL_RE } from "@/lib/schemas";
 import { rejectIfKiosk } from "@/lib/kiosk-server";
 import { createLogger } from "@/lib/logger";
 import { withRequestContext } from "@/lib/with-request-context";
@@ -108,7 +109,7 @@ const AddFeedSchema = z.object({
 
 const AddCameraSchema = z
   .object({
-    cameraId: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/),
+    cameraId: z.string().regex(CAMERA_ID_RE),
     role: z.string().optional(),
     description: z.string().optional(),
     rtspUrl: z.string().optional(),
@@ -124,7 +125,7 @@ const AddCameraSchema = z
     message: "Provide either an uploaded feed or an rtspUrl",
     path: ["rtspUrl"],
   })
-  .refine((v) => !v.rtspUrl?.trim() || /^rtsps?:\/\/\S+$/.test(v.rtspUrl.trim()), {
+  .refine((v) => !v.rtspUrl?.trim() || RTSP_URL_RE.test(v.rtspUrl.trim()), {
     message: "rtspUrl must be an rtsp:// or rtsps:// URL",
     path: ["rtspUrl"],
   });

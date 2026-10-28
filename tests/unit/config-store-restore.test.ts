@@ -21,9 +21,14 @@ import { GET as exportGET } from "@/app/api/config-store/export/route";
 import { POST as restorePOST } from "@/app/api/config-store/restore/route";
 import { NextRequest } from "next/server";
 
-const CAMS = [0, 1, 2, 3].map((i) => ({ id: `cam${i}`, rtspUrl: `rtsp://10.0.0.${i}:8554/video0`, enabled: true }));
-const SCEN = [{ id: "s1", name: "Theft", severity: "high", channels: ["ui"], sensor_filter: "*", keywords: ["x"], enabled: true }];
-const SETS = [{ id: "p1", name: "Retail", text: "Watch the shelves" }];
+// The shapes the showroom's store holds (2026-10-28 backup), stamps included.
+const STAMP = { updatedBy: "config-store-migrate", updatedAt: "2026-08-13T05:44:36.120Z" };
+const CAMS = [0, 1, 2, 3].map((i) => ({
+  id: `cam${i}`, rtspUrl: `rtsp://10.0.0.${i}:8554/video0`, role: "checkout", description: `lens ${i}`, promptId: "p1",
+  recording: { enabled: true, retentionDays: 7, policy: "always" }, ...STAMP,
+}));
+const SCEN = [{ id: "s1", name: "Theft", severity: "high", channels: ["ui"], sensor_filter: "cam0,cam1", keywords: ["x"], enabled: true, cooldown_seconds: 120, ...STAMP }];
+const SETS = [{ id: "p1", name: "Retail", text: "Watch the shelves", ...STAMP }];
 const COPY = { schema: CONFIG_SCHEMA, instance: "showroom", cameras: CAMS, scenarios: SCEN, promptSets: SETS, activePromptId: "p1" };
 
 let dir: string;
@@ -62,8 +67,25 @@ describe("parseFillSource", () => {
     expect(() => parseFillSource({ ...COPY, instance: "other" }, "showroom")).toThrow(FillError);
     expect(() => parseFillSource({ ...COPY, extra: 1 }, "showroom")).toThrow(/unknown field/);
     expect(() => parseFillSource({ cameras: [CAMS[0], CAMS[0]] }, "showroom")).toThrow(/twice/);
-    expect(() => parseFillSource({ cameras: [{ rtspUrl: "x" }] }, "showroom")).toThrow(/no string id/);
+    expect(() => parseFillSource({ cameras: [{ rtspUrl: "rtsp://h/v" }] }, "showroom")).toThrow(/cameras\[0\]\.id/);
     expect(() => parseFillSource({ schema: "other" }, "showroom")).toThrow(/schema/);
+  });
+  it("validates every entry as the normal routes would: strict fields, the camera id and RTSP rule", () => {
+    const cam = (over: Record<string, unknown>) => () => parseFillSource({ cameras: [{ ...CAMS[0], ...over }] }, "showroom");
+    expect(cam({ rtspUrl: "http://169.254.169.254/latest/meta-data" })).toThrow(/cameras\[0\]\.rtspUrl/);
+    expect(cam({ rtspUrl: "rtsp://h/v x" })).toThrow(/rtspUrl/);
+    expect(cam({ id: "Not A Sensor" })).toThrow(/cameras\[0\]\.id/);
+    expect(cam({ webhook: "http://attacker" })).toThrow(/Unrecognized key/);
+    expect(cam({ recording: { enabled: true, retentionDays: 7, policy: "always", hook: "x" } })).toThrow(/recording/);
+    expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], url: "http://x" }] }, "showroom")).toThrow(/scenarios\[0\]/);
+    expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], severity: "urgent" }] }, "showroom")).toThrow(/severity/);
+    expect(() => parseFillSource({ promptSets: [{ ...SETS[0], endpoint: "http://x" }] }, "showroom")).toThrow(/promptSets\[0\]/);
+    expect(() => parseFillSource({ promptSets: [{ ...SETS[0], text: 42 }] }, "showroom")).toThrow(/text/);
+  });
+  it("drops the copy's stamps: the restore stamps its own", () => {
+    const src = parseFillSource(COPY, "showroom");
+    expect(src.cameras[0]).not.toHaveProperty("updatedBy");
+    expect(src.cameras[0]).toMatchObject({ id: "cam0", rtspUrl: "rtsp://10.0.0.0:8554/video0", recording: { policy: "always" } });
   });
 });
 
@@ -122,6 +144,34 @@ describe("GET /api/config-store/export and POST /api/config-store/restore", () =
   it("export answers 503, never empty lists, when the store cannot be read", async () => {
     await writeFile(configFilePath("showroom", dir), "cameras: [unclosed\n");
     expect((await exportGET()).status).toBe(503);
+  });
+  it("413 on a Content-Length over 1 MiB, and on a streamed body that passes it with no length, nothing written", async () => {
+    await store.writeCameras("showroom", [], "wipe");
+    const declared = new NextRequest("http://console/api/config-store/restore", {
+      method: "POST", headers: { "content-type": "application/json", "content-length": String(2 * 1024 * 1024) }, body: "{}",
+    });
+    expect((await restorePOST(declared)).status).toBe(413);
+    let pulled = 0;
+    const chunk = new TextEncoder().encode(" ".repeat(64 * 1024));
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled++;
+        if (pulled > 64) c.close(); // 4 MiB if read whole
+        else c.enqueue(chunk);
+      },
+    });
+    const streamed = new NextRequest("http://console/api/config-store/restore", {
+      method: "POST", headers: { "content-type": "application/json" }, body: stream, duplex: "half",
+    } as ConstructorParameters<typeof NextRequest>[1] & { duplex: "half" });
+    expect((await restorePOST(streamed)).status).toBe(413);
+    expect(pulled).toBeLessThanOrEqual(18); // stopped just past 1 MiB, not read to the end
+    expect(await store.readCameras("showroom")).toEqual([]);
+  });
+  it("400 on an entry the normal routes would refuse, nothing written", async () => {
+    await store.writeCameras("showroom", [], "wipe");
+    const res = await post({ cameras: [{ ...CAMS[0], rtspUrl: "http://10.0.0.1/" }] });
+    expect(res.status).toBe(400);
+    expect(await store.readCameras("showroom")).toEqual([]);
   });
   it("401 without a session, 415 without JSON, 400 on a bad body, 501 on another backend", async () => {
     expect((await post(COPY, "text/plain")).status).toBe(415);

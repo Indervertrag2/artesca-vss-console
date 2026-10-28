@@ -14,6 +14,28 @@ const log = createLogger("api/config-store/restore");
 const MAX_BODY_BYTES = 1024 * 1024;
 
 /**
+ * The body as UTF-8, read chunk by chunk and abandoned as soon as it passes `max` bytes (null), so an oversized
+ * body is never held whole; decoded only once complete.
+ */
+async function readCapped(req: NextRequest, max: number): Promise<string | null> {
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+/**
  * POST /api/config-store/restore — fill each EMPTY list of this instance's store
  * (cameras, scenarios, prompt sets) from a copy `GET /api/config-store/export`
  * gave, and nothing else. A list that holds anything is kept as it is, whatever
@@ -35,8 +57,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
   }
 
-  const text = await req.text();
-  if (text.length > MAX_BODY_BYTES) return NextResponse.json({ error: `body over ${MAX_BODY_BYTES} bytes` }, { status: 413 });
+  const tooLarge = () => NextResponse.json({ error: `body over ${MAX_BODY_BYTES} bytes` }, { status: 413 });
+  const declared = Number(req.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return tooLarge();
+  const text = await readCapped(req, MAX_BODY_BYTES);
+  if (text === null) return tooLarge();
 
   const { makeReconcileContext } = await import("@/lib/reconcile/context");
   let ctx;
