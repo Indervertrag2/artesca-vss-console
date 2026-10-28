@@ -35,17 +35,17 @@
       "/storage",
       "/topology"
     ],
-    "apiRoutes": 68,
-    "mutatingCount": 33,
-    "guardedCount": 17,
+    "apiRoutes": 70,
+    "mutatingCount": 34,
+    "guardedCount": 18,
     "backendCounts": {
-      "k8s": 30,
+      "k8s": 32,
       "ssh": 2,
       "s3": 15,
       "kafka": 6,
       "redis": 1,
-      "config-store": 11,
-      "helpers/gcs-config": 15
+      "config-store": 13,
+      "helpers/gcs-config": 17
     },
     "configStoreKeys": [
       "defaultKind",
