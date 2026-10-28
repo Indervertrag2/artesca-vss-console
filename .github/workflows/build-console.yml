@@ -91,7 +91,9 @@ concurrency:
 
 jobs:
   ci:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest became Ubuntu 26.04, on which Playwright installs no Chromium ("Playwright does not support
+    # chromium on ubuntu26.04-x64", run 40723961222, 2026-10-28).
+    runs-on: ubuntu-24.04
 
     steps:
       # Shallow clone — full history not needed for lint/test/build.
@@ -165,7 +167,7 @@ jobs:
     needs: ci
     # Only run on push to main — skip on PRs.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     permissions:
       contents: read

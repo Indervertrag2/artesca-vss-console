@@ -33,6 +33,11 @@ export const FeedSchema = z.object({
   codec: z.enum(["hevc", "h264"]).optional(),
 });
 
+/** A camera id as POST /api/cameras takes it (it becomes the VST sensor name). */
+export const CAMERA_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
+/** A camera's source as POST /api/cameras takes it: rtsp:// or rtsps://, no whitespace. */
+export const RTSP_URL_RE = /^rtsps?:\/\/\S+$/;
+
 export const RecordingPolicySchema = z.enum(["always", "event-only", "off"]);
 
 export const CameraRecordingSchema = z.object({
