@@ -9,6 +9,7 @@ import { SecretRow } from "@/components/secrets/SecretRow";
 import { RotateSecretDialog } from "@/components/secrets/RotateSecretDialog";
 import { RotationNagBanner } from "@/components/secrets/RotationNagBanner";
 import { useToast } from "@/hooks/use-toast";
+import { responseError } from "@/lib/response-error";
 
 interface SecretStatus {
   key: string;
@@ -72,7 +73,7 @@ export default function SecretsPage() {
     if (!res.ok) {
       toast({
         title: "Rotation failed",
-        description: await res.text(),
+        description: (await responseError(res, "Rotation failed")).message,
         variant: "destructive",
       });
       return;

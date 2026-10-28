@@ -9,6 +9,7 @@ import { ProfileTable } from "@/components/profiles/ProfileTable";
 import { SaveProfileDialog } from "@/components/profiles/SaveProfileDialog";
 import { LoadProfileDialog } from "@/components/profiles/LoadProfileDialog";
 import { useToast } from "@/hooks/use-toast";
+import { responseError } from "@/lib/response-error";
 import type { DemoProfile } from "@/lib/types";
 
 interface ProfileMeta {
@@ -50,7 +51,7 @@ export default function ProfilesPage() {
       body: JSON.stringify({ name }),
     });
     if (!res.ok) {
-      toast({ title: "Save failed", description: await res.text(), variant: "destructive" });
+      toast({ title: "Save failed", description: (await responseError(res, "Save failed")).message, variant: "destructive" });
       return;
     }
     toast({ title: `Profile "${name}" saved` });
@@ -63,7 +64,7 @@ export default function ProfilesPage() {
       method: "PUT",
     });
     if (!res.ok) {
-      toast({ title: "Load failed", description: await res.text(), variant: "destructive" });
+      toast({ title: "Load failed", description: (await responseError(res, "Load failed")).message, variant: "destructive" });
       return;
     }
     toast({ title: `Profile "${loadTarget.name}" loaded` });
