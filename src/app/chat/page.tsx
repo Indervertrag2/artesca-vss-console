@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Bot, CheckCircle2, Loader2, Mic, MicOff, Send, User, Video, Volume2, XCircle } from "lucide-react";
 import { Shell } from "@/components/Shell";
 import { MarkdownReport } from "@/components/MarkdownReport";
@@ -141,6 +141,8 @@ function ReasoningBlock({ steps }: { steps: ReasoningStep[] }) {
     </div>
   );
 }
+
+const noSubscribe = () => () => {};
 
 export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>(() => {
@@ -412,6 +414,12 @@ export default function ChatPage() {
       /* ignore */
     }
   }
+
+  // History, scope and voice choice come from localStorage and voice support
+  // from window, so the server renders none of them. Hold the page back until
+  // hydration is done, or React reports a mismatch (#418) and re-renders it all.
+  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
+  if (!hydrated) return <Shell>{null}</Shell>;
 
   return (
     <Shell>
