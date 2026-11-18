@@ -16,6 +16,7 @@ import { Loader2, Play, Square, Trash2, Upload } from "lucide-react";
 
 const FileSchema = z.object({
   name: z.string(),
+  cameraId: z.string(),
   sizeBytes: z.number(),
   uploadedAt: z.string(),
 });
@@ -43,11 +44,6 @@ function humanSize(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
   if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`;
   return `${(bytes / 1e3).toFixed(0)} kB`;
-}
-
-/** Camera id a file's run uses — mirrors footageCameraId() on the server. */
-function cameraIdFor(name: string): string {
-  return `test-${name.replace(/\.[^.]+$/, "")}`.slice(0, 32);
 }
 
 export function TestFootagePanel() {
@@ -368,7 +364,7 @@ export function TestFootagePanel() {
       {data && data.files.length > 0 && (
         <div className="rounded-md border border-border divide-y divide-border">
           {data.files.map((f: Footage) => {
-            const isRunning = running.has(cameraIdFor(f.name));
+            const isRunning = running.has(f.cameraId);
             return (
               <div key={f.name} className="flex flex-wrap items-center gap-3 px-3 py-2">
                 <span className="font-mono text-sm">{f.name}</span>
@@ -378,7 +374,7 @@ export function TestFootagePanel() {
                     variant="outline"
                     className="text-[10px] px-1.5 py-0 bg-emerald-50 border-emerald-200 text-emerald-700"
                   >
-                    ● RUNNING as {cameraIdFor(f.name)}
+                    ● RUNNING as {f.cameraId}
                   </Badge>
                 )}
                 <div className="ml-auto flex gap-1">
@@ -387,7 +383,7 @@ export function TestFootagePanel() {
                       variant="outline"
                       size="sm"
                       className="h-7 px-2 text-xs"
-                      onClick={() => stopRun.mutate(cameraIdFor(f.name))}
+                      onClick={() => stopRun.mutate(f.cameraId)}
                       disabled={stopRun.isPending}
                     >
                       <Square className="h-3 w-3 mr-1" />
