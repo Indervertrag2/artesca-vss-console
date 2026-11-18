@@ -116,10 +116,19 @@ export default function AnalyticsPage() {
         count = s.total ?? 0;
         subject = `incident${count === 1 ? "" : "s"}`;
       }
-      const where = parsed.camera && parsed.category ? ` on ${parsed.camera}` : "";
+      // /api/analytics counts categories over all cameras only, so a question
+      // naming both gets the all-camera category count, labelled as such, and
+      // the camera's own total.
+      let text = `${count} ${subject} ${parsed.windowLabel}.`;
+      if (parsed.camera && parsed.category) {
+        const onCamera = s.byCamera?.[parsed.camera] ?? 0;
+        text =
+          `${count} ${subject} across all cameras ${parsed.windowLabel}; ` +
+          `${onCamera} incident${onCamera === 1 ? "" : "s"} of any category on ${parsed.camera}.`;
+      }
       setAnswer({
         question: q,
-        text: `${count} ${subject}${where} ${parsed.windowLabel}.`,
+        text,
         clipQuery: q,
       });
     } catch (e) {
