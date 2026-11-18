@@ -15,7 +15,7 @@
 import { z } from "zod";
 import { CONFIG_SCHEMA } from "@/lib/config-store/file";
 import { CAMERA_ID_RE, CameraRecordingSchema, RTSP_URL_RE } from "@/lib/schemas";
-import { ScenarioMultiFields } from "@/lib/purchase-judge";
+import { refineEvidence, ScenarioMultiFields } from "@/lib/purchase-judge";
 
 export const FILL_LISTS = ["cameras", "scenarios", "promptSets"] as const;
 export type FillList = (typeof FILL_LISTS)[number];
@@ -77,7 +77,8 @@ export const FillScenarioSchema = z
     ...ScenarioMultiFields,
     ...STAMPS,
   })
-  .strict();
+  .strict()
+  .superRefine(refineEvidence);
 
 export const FillPromptSetSchema = z
   .object({

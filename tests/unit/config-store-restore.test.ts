@@ -84,6 +84,13 @@ describe("parseFillSource", () => {
     expect(parseFillSource({ scenarios: [{ ...SCEN[0], ...multi }] }, "showroom").scenarios[0]).toMatchObject(multi);
     expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], ...multi, sources: [{ id: "till-1", role: "boss" }] }] }, "showroom")).toThrow(/scenarios\[0\]/);
     expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], ...multi, rules: { ...multi.rules, url: "x" } }] }, "showroom")).toThrow(/scenarios\[0\]/);
+    // Its evidence settings and a camera's crop restore too (#60), checked like a normal save.
+    const recorded = { ...multi, cameras: [{ id: "cam0", crop: { x: 400, y: 200, width: 1100, height: 620 } }], evidence: "recording", chunkS: 8, overlapS: 3, framesPerSecond: 5, question: "Question: is a product carried away?", systemPrompt: "You watch a self-checkout." };
+    expect(parseFillSource({ scenarios: [{ ...SCEN[0], ...recorded }] }, "showroom").scenarios[0]).toMatchObject(recorded);
+    expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], ...recorded, chunkS: 16 }] }, "showroom")).toThrow(/scenarios\[0\]\.evidence: .*80 frames per request/);
+    expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], ...recorded, overlapS: 8 }] }, "showroom")).toThrow(/Overlap/);
+    expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], ...recorded, evidence: "tape" }] }, "showroom")).toThrow(/scenarios\[0\]\.evidence/);
+    expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], ...recorded, cameras: [{ id: "cam0", crop: { x: 0, y: 0, width: 800, height: 600, url: "x" } }] }] }, "showroom")).toThrow(/scenarios\[0\]\.cameras/);
     expect(() => parseFillSource({ promptSets: [{ ...SETS[0], endpoint: "http://x" }] }, "showroom")).toThrow(/promptSets\[0\]/);
     expect(() => parseFillSource({ promptSets: [{ ...SETS[0], text: 42 }] }, "showroom")).toThrow(/text/);
   });

@@ -11,21 +11,27 @@ import {
   purchaseIncident,
   purchasesFromEvents,
   purchaseWindow,
+  recordingSettings,
   type Hint,
   type JudgeConfig,
   type Purchase,
   type PurchaseVerdict,
   type TillEvent,
 } from "@/lib/purchase-judge";
+import { recordingHints, RecordingUnavailableError } from "@/lib/purchase-recording";
+import { CLIP_SETTLE_MS } from "@/lib/streams/vst-clip";
 import type { ScenarioEntry } from "@/lib/config-store/types";
 import type { Incident } from "@/lib/types";
 
 // Runs the purchase judge (purchase-judge.ts) for every enabled multi-camera
 // scenario: each purchase of its clock till is judged once, at close +
 // windowAfterS + 30 s, against the per-chunk alerts of its cameras, and the
-// verdict lands in SQLite (`purchase_evaluations`). Started once per console
-// process from instrumentation.ts, beside the source poller: the console pod
-// owns the SQLite file and runs as a single replica.
+// verdict lands in SQLite (`purchase_evaluations`). A scenario with `evidence:
+// "recording"` takes its hints from the recording of the purchase instead
+// (purchase-recording.ts): at close + windowAfterS + 60 s, when VST has finalized
+// it, and in the background, because asking about every chunk takes minutes.
+// Started once per console process from instrumentation.ts, beside the source
+// poller: the console pod owns the SQLite file and runs as a single replica.
 
 const log = createLogger("purchase-runner");
 
@@ -38,14 +44,19 @@ const EVENTS_LOOKBACK_MS = 3 * 3_600_000;
 /** Incidents read from the bridge per pass; it lists newest first. */
 const HINT_LIMIT = 500;
 const KEEP_DAYS = 30;
+/** A purchase whose recording could not be judged is tried again this much later, at the earliest. */
+const RECORDING_RETRY_MS = 30_000;
 
 // On globalThis: instrumentation and the routes reading the state need not share a module instance.
 interface RunnerState {
   errors: Map<string, string>;
+  /** Purchases judged from their recording, by scenario, till, purchase and close:
+   *  the time before which one is not started again. Infinity while it runs. */
+  recordingJobs: Map<string, number>;
   started?: boolean;
 }
 const g = globalThis as unknown as { __purchaseRunner?: RunnerState };
-const shared: RunnerState = (g.__purchaseRunner ??= { errors: new Map() });
+const shared: RunnerState = (g.__purchaseRunner ??= { errors: new Map(), recordingJobs: new Map() });
 
 // ─── Storage ──────────────────────────────────────────────────────────────────
 
@@ -207,6 +218,64 @@ const judgeConfig = (s: ScenarioEntry, clock: string, neighbours: Purchase[]): J
   neighbours,
 });
 
+type RecordingHints = typeof recordingHints;
+
+/** Judge one purchase from the recordings of its window instead of the live alerts.
+ *  Throws when a recording or the VLM is missing: nothing is judged on part of the evidence. */
+async function judgeFromRecording(
+  s: ScenarioEntry,
+  clock: string,
+  p: Purchase,
+  finished: Purchase[],
+  getHints: RecordingHints,
+): Promise<PurchaseVerdict> {
+  const cfg = judgeConfig(s, clock, finished);
+  const w = purchaseWindow(p, s.rules ?? DEFAULT_RULES);
+  if (!w) return judgePurchase(p, [], cfg);
+  const { hints, chunksAsked } = await getHints(s, w);
+  const { chunkS, overlapS } = recordingSettings(s);
+  return { ...judgePurchase(p, hints, cfg), evidence: "recording", chunkS, overlapS, chunksAsked };
+}
+
+function noteError(scenarioId: string, err: unknown): void {
+  const error = err instanceof Error ? err.message : String(err);
+  if (shared.errors.get(scenarioId) !== error) log.warn(`purchase judge: ${scenarioId} not judged`, { error });
+  shared.errors.set(scenarioId, error);
+}
+
+/**
+ * Start judging one purchase from its recording and return at once. The same
+ * purchase is not started again while it runs, nor within `retryMs` of a failure
+ * (the recording is not there yet, the VLM is down); the failure shows as the
+ * scenario's error until a later pass judges the purchase.
+ */
+function judgeInBackground(
+  s: ScenarioEntry,
+  clock: string,
+  p: Purchase,
+  finished: Purchase[],
+  now: number,
+  retryMs: number,
+  getHints: RecordingHints,
+): void {
+  const key = [s.id, clock, p.id, p.closedAt].join("|");
+  if ((shared.recordingJobs.get(key) ?? 0) > now) return;
+  shared.recordingJobs.set(key, Infinity);
+  void (async () => {
+    try {
+      const v = await judgeFromRecording(s, clock, p, finished, getHints);
+      if (saveVerdict(v, new Date(now))) {
+        log.info(`judged purchase ${p.id} of ${clock} for ${s.id} from its recording: ${v.incident ? "incident" : "no incident"}`);
+      }
+      shared.recordingJobs.delete(key);
+      shared.errors.delete(s.id);
+    } catch (err) {
+      shared.recordingJobs.set(key, now + retryMs);
+      noteError(s.id, err);
+    }
+  })();
+}
+
 export interface PurchaseRow {
   purchaseId: string;
   closedAt: string;
@@ -262,7 +331,9 @@ export async function scenarioPurchases(
  * Judge one finished purchase again now, with the bridge's alerts around its window
  * (a past purchase, or one judged before its hints were complete), and store the
  * verdict over the old one. Idempotent: the same inputs give the same verdict and
- * the same single row; the incident list shows it as soon as it is stored.
+ * the same single row; the incident list shows it as soon as it is stored. A
+ * scenario with `evidence: "recording"` asks about the recordings again; VST keeps
+ * them for hours, not days, and after that this throws "recording no longer available".
  */
 export async function reevaluatePurchase(
   s: ScenarioEntry,
@@ -270,6 +341,7 @@ export async function reevaluatePurchase(
   deps: {
     readTillEvents: RunnerDeps["readTillEvents"];
     fetchHintsBetween: (start: string, end: string) => Promise<Hint[]>;
+    recordingHints?: RecordingHints;
   },
   now = new Date(),
 ): Promise<PurchaseVerdict | null> {
@@ -280,14 +352,25 @@ export async function reevaluatePurchase(
     .sort((a, b) => Date.parse(b.closedAt) - Date.parse(a.closedAt))[0];
   if (!p) return null;
   const w = purchaseWindow(p, s.rules ?? DEFAULT_RULES);
-  // A chunk that starts before the window can still reach into it.
-  const hints = w
-    ? await deps.fetchHintsBetween(
-        new Date(Date.parse(w.start) - 60_000).toISOString(),
-        new Date(Date.parse(w.end) + 60_000).toISOString(),
-      )
-    : [];
-  const v = judgePurchase(p, hints, judgeConfig(s, clock, finished));
+  let v: PurchaseVerdict;
+  if (s.evidence === "recording") {
+    v = await judgeFromRecording(s, clock, p, finished, deps.recordingHints ?? recordingHints).catch((err: unknown) => {
+      // Missing once VST has had the time to finalize it means gone, not late.
+      const settled = !!w && Date.parse(w.end) + CLIP_SETTLE_MS <= now.getTime();
+      throw err instanceof RecordingUnavailableError && settled
+        ? new Error(`recording no longer available (${err.message})`)
+        : err;
+    });
+  } else {
+    // A chunk that starts before the window can still reach into it.
+    const hints = w
+      ? await deps.fetchHintsBetween(
+          new Date(Date.parse(w.start) - 60_000).toISOString(),
+          new Date(Date.parse(w.end) + 60_000).toISOString(),
+        )
+      : [];
+    v = judgePurchase(p, hints, judgeConfig(s, clock, finished));
+  }
   saveVerdict(v, now, true);
   log.info(`re-evaluated purchase ${p.id} of ${clock} for ${s.id}: ${v.incident ? "incident" : "no incident"}`);
   return v;
@@ -298,34 +381,54 @@ export interface RunnerDeps {
   /** The till's stored events (External Sources), any order. */
   readTillEvents: (sourceId: string) => TillEvent[] | Promise<TillEvent[]>;
   fetchHints: () => Promise<Hint[]>;
+  /** Hints from the recording of a purchase window; purchase-recording.ts unless given. */
+  recordingHints?: RecordingHints;
   now?: number;
 }
 
 /**
  * One pass: judge every purchase that is due and not yet judged. A scenario that
  * cannot be judged now (no clock source, bridge down) records an error and is
- * retried next pass; nothing is stored for it.
+ * retried next pass; nothing is stored for it. A purchase judged from its
+ * recording is only started here: its verdict is stored when it finishes and is
+ * not among the ones returned.
  */
 export async function evaluateDuePurchases(deps: RunnerDeps): Promise<PurchaseVerdict[]> {
   const now = deps.now ?? Date.now();
   const done: PurchaseVerdict[] = [];
   let hints: Promise<Hint[]> | null = null;
   const scenarios = (await deps.readScenarios()).filter((s) => s.enabled && s.mode === "multi");
+  for (const [key, notBefore] of shared.recordingJobs) {
+    if (notBefore < now - DUE_LOOKBACK_MS) shared.recordingJobs.delete(key);
+  }
   for (const s of scenarios) {
     try {
       const clock = clockOf(s);
       const rules = s.rules ?? DEFAULT_RULES;
+      const recording = s.evidence === "recording";
+      // VST finalizes a recording about 50 s after its end: asked for earlier, it is missing or cut short.
+      const delayMs = recording ? CLIP_SETTLE_MS : EVALUATION_DELAY_S * 1000;
       const events = (await deps.readTillEvents(clock)).filter((e) => Date.parse(e.ts ?? "") >= now - EVENTS_LOOKBACK_MS);
       const finished = purchasesFromEvents(events);
       const due = finished.filter((p) => {
         const closed = Date.parse(p.closedAt);
         return (
           closed >= now - DUE_LOOKBACK_MS &&
-          closed + (rules.windowAfterS + EVALUATION_DELAY_S) * 1000 <= now &&
+          closed + rules.windowAfterS * 1000 + delayMs <= now &&
           !isEvaluated(s.id, clock, p.id, p.closedAt)
         );
       });
-      if (due.length) {
+      if (recording) {
+        for (const p of due) {
+          // A failed purchase waits as long again as it has been due, so the gaps double:
+          // a recording that stays short is not downloaded and re-encoded on every pass.
+          const overdueMs = now - (Date.parse(p.closedAt) + rules.windowAfterS * 1000 + delayMs);
+          const retryMs = Math.max(RECORDING_RETRY_MS, overdueMs);
+          judgeInBackground(s, clock, p, finished, now, retryMs, deps.recordingHints ?? recordingHints);
+        }
+        // A purchase still to be judged keeps the scenario's error until it is judged or given up.
+        if (due.length) continue;
+      } else if (due.length) {
         hints ??= deps.fetchHints();
         const all = await hints;
         for (const p of due) {
@@ -338,9 +441,7 @@ export async function evaluateDuePurchases(deps: RunnerDeps): Promise<PurchaseVe
       }
       shared.errors.delete(s.id);
     } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      if (shared.errors.get(s.id) !== error) log.warn(`purchase judge: ${s.id} not judged`, { error });
-      shared.errors.set(s.id, error);
+      noteError(s.id, err);
     }
   }
   return done;

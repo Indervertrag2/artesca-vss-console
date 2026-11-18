@@ -76,5 +76,20 @@ describe("purchase incident detail", () => {
     expect(q.get("sensor")).toBe("overhead-cam");
     expect(q.get("q")).toContain("Cola 0,33 l Flasche");
     expect(q.get("q")).toContain("overhead-cam, scanner-cam (scanner glass)");
+    // A verdict from the live alerts says nothing about chunks.
+    expect(text).not.toContain("Evidence:");
+    expect(text).not.toContain("reported something");
+  });
+
+  it("says how a verdict judged from the recording was cut and what each camera reported (#60)", async () => {
+    const recorded = {
+      ...INCIDENT,
+      ...purchaseIncident({ ...verdict, evidence: "recording", chunkS: 10, overlapS: 4, chunksAsked: { "overhead-cam": 10, "scanner-cam": 10 } }),
+    };
+    await act(async () => { root.render(<IncidentDetail incident={recorded} onClose={() => {}} />); });
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("Evidence: recording, 10 s chunks, 4 s overlap; 10 chunks per camera");
+    expect(text).toContain("0 of 10 chunks reported something");
+    expect(text).toContain("2 of 10 chunks reported something");
   });
 });

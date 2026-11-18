@@ -53,7 +53,20 @@ export function ScenarioRow({
             sources: scenario.sources ?? [],
             rules: scenario.rules ?? DEFAULT_RULES,
           }
-        : (({ mode: _m, cameras: _c, sources: _s, rules: _r, productClasses: _p, ...rest }) => rest)(scenario),
+        : (({
+            mode: _m,
+            cameras: _c,
+            sources: _s,
+            rules: _r,
+            productClasses: _p,
+            evidence: _e,
+            chunkS: _cs,
+            overlapS: _o,
+            framesPerSecond: _f,
+            question: _q,
+            systemPrompt: _sp,
+            ...rest
+          }) => rest)(scenario),
     );
   const update = <K extends keyof Scenario>(key: K, value: Scenario[K]) => {
     onChange({ ...scenario, [key]: value });

@@ -13,6 +13,7 @@ import type { Incident } from "@/lib/types";
 // The detail of a purchase incident (multi-camera scenario): the till record,
 // every camera hint with the rule that discarded it or why it remained, one clip
 // per camera loaded only on request, and a chat that starts from the till data.
+// A verdict judged from the recording also says how it was cut and asked.
 
 const OUTCOME: Record<HintOutcome, { label: string; cls: string }> = {
   remains: { label: "not explained", cls: "bg-red-50 text-red-700 border-red-200" },
@@ -32,6 +33,9 @@ interface Props {
 export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props) {
   const [open, setOpen] = useState<Set<string>>(new Set());
   const w = v.window ?? { start: v.closedAt, end: v.closedAt };
+  // Only on a verdict judged from the recording: chunks put to the model, per camera.
+  const asked = v.evidence === "recording" ? (v.chunksAsked ?? {}) : null;
+  const perCamera = [...new Set(Object.values(asked ?? {}))].join(" or ") || "0";
   const toggle = (id: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -56,6 +60,11 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
 
         <div className="min-w-0 space-y-5 text-sm">
           <p>{v.summary}</p>
+          {asked && (
+            <p className="text-xs text-muted-foreground">
+              {`Evidence: recording, ${v.chunkS} s chunks, ${v.overlapS} s overlap; ${perCamera} chunk${perCamera === "1" ? "" : "s"} per camera`}
+            </p>
+          )}
 
           <section className="space-y-3">
             <h3 className="text-xs font-medium uppercase text-muted-foreground">Why</h3>
@@ -113,6 +122,11 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
                     <span className="font-mono">{c.id}</span>
                     {c.view && <span className="ml-2 text-muted-foreground">{c.view}</span>}
                     <span className="ml-2">{v.camerasSaw.includes(c.id) ? "saw it" : "no unexplained hint"}</span>
+                    {asked && (
+                      <span className="ml-2 text-muted-foreground">
+                        {`${v.hints.filter((h) => h.cameraId === c.id && h.outcome !== "negative").length} of ${asked[c.id] ?? 0} chunks reported something`}
+                      </span>
+                    )}
                   </div>
                   <Button type="button" variant="outline" size="sm" className="h-7 w-24 shrink-0 px-2 text-[11px]" onClick={() => toggle(c.id)}>
                     <Video className="mr-1.5 h-3 w-3" />

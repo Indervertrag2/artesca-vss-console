@@ -12,8 +12,14 @@ import {
   purchaseVerdictOf,
   purchaseChatQuestion,
   multiFields,
+  planChunks,
+  evidenceError,
+  recordingSettings,
+  isNegative,
   DEFAULT_PRODUCT_CLASSES,
+  DEFAULT_QUESTION,
   DEFAULT_RULES,
+  DEFAULT_SYSTEM_PROMPT,
   type Hint,
   type TillEvent,
 } from "@/lib/purchase-judge";
@@ -248,6 +254,19 @@ describe("multiFields", () => {
     expect(multiFields({})).toEqual({});
     expect(multiFields({ mode: "multi" })).toEqual({ mode: "multi", cameras: [], sources: [], rules: DEFAULT_RULES });
   });
+
+  it("stores the evidence fields that are set and adds none (#60)", () => {
+    const set = { evidence: "recording" as const, chunkS: 8, question: "Question: is a product carried away?" };
+    const cameras = [{ id: "overhead-cam", crop: { x: 400, y: 200, width: 1100, height: 620 } }];
+    expect(multiFields({ mode: "multi", cameras, ...set })).toEqual({
+      mode: "multi",
+      cameras,
+      sources: [],
+      rules: DEFAULT_RULES,
+      ...set,
+    });
+    expect(multiFields({ mode: "single", ...set })).toEqual({});
+  });
 });
 
 describe("back-to-back purchases: the customer before is still leaving", () => {
@@ -279,5 +298,87 @@ describe("bookedCount", () => {
   it("takes one scan back per void row", () => {
     expect(bookedCount([{ voided: false }, { voided: false }, { voided: true }])).toBe(1);
     expect(bookedCount([{ voided: true }])).toBe(0);
+  });
+});
+
+describe("evidence from the recording (#60)", () => {
+  const spans = (durationS: number, chunkS: number, overlapS: number) =>
+    planChunks(durationS, chunkS, overlapS).map((c) => [c.startS, c.endS]);
+
+  it("cuts a chunk every chunkS - overlapS seconds from the window start", () => {
+    expect(spans(22, 10, 4)).toEqual([[0, 10], [6, 16], [12, 22]]);
+    // A 62 s window, the defaults: 10 chunks.
+    expect(spans(62, 10, 4)).toHaveLength(10);
+    expect(spans(62, 10, 4).slice(0, 3)).toEqual([[0, 10], [6, 16], [12, 22]]);
+  });
+
+  it("moves the last chunk back so it ends with the window at full length", () => {
+    expect(spans(20, 10, 4)).toEqual([[0, 10], [6, 16], [10, 20]]);
+    expect(spans(62, 10, 4).at(-1)).toEqual([52, 62]);
+    // No chunk twice when the grid already ends with the window.
+    expect(spans(16, 10, 4)).toEqual([[0, 10], [6, 16]]);
+  });
+
+  it("puts chunks end to end with overlap 0", () => {
+    expect(spans(30, 10, 0)).toEqual([[0, 10], [10, 20], [20, 30]]);
+    expect(spans(25, 10, 0)).toEqual([[0, 10], [10, 20], [15, 25]]);
+  });
+
+  it("makes one chunk of a window shorter than a chunk, and none of an empty one", () => {
+    expect(spans(7, 10, 4)).toEqual([[0, 7]]);
+    expect(spans(10, 10, 4)).toEqual([[0, 10]]);
+    expect(spans(0, 10, 4)).toEqual([]);
+  });
+
+  it("rounds a window with a fraction of a second up, so every chunk starts on a whole second", () => {
+    expect(spans(21.3, 10, 4)).toEqual([[0, 10], [6, 16], [12, 22]]);
+  });
+
+  it("ends on settings the schema would refuse instead of looping", () => {
+    expect(spans(13, 10, 10).length).toBeLessThan(10);
+  });
+
+  it("fills the defaults: 10 s chunks, 4 s overlap, 4 frames per second, the stock question and system prompt", () => {
+    expect(recordingSettings({})).toEqual({
+      chunkS: 10,
+      overlapS: 4,
+      framesPerSecond: 4,
+      question: DEFAULT_QUESTION,
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+    });
+    expect(recordingSettings({ chunkS: 6, systemPrompt: "Watch the scanner." })).toMatchObject({ chunkS: 6, overlapS: 4, systemPrompt: "Watch the scanner." });
+    expect(DEFAULT_QUESTION).toContain("scanner?\nAnswer with exactly No, or with Yes - <the product> - ");
+  });
+
+  it("accepts the defaults and the edges of every range", () => {
+    expect(evidenceError({})).toBeNull();
+    expect(evidenceError({ chunkS: 2, overlapS: 1, framesPerSecond: 8 })).toBeNull();
+    expect(evidenceError({ chunkS: 30, overlapS: 29, framesPerSecond: 2 })).toBeNull();
+    expect(evidenceError({ chunkS: 15, overlapS: 0, framesPerSecond: 4 })).toBeNull();
+  });
+
+  it("refuses more frames per request than the model takes, in words", () => {
+    expect(evidenceError({ chunkS: 16, framesPerSecond: 4 })).toMatch(/64 frames per request; the model takes at most 60/);
+    expect(evidenceError({ chunkS: 30, overlapS: 4, framesPerSecond: 3 })).toMatch(/90 frames/);
+  });
+
+  it("refuses values out of range, an overlap as long as the chunk, an empty question and a crop without a size", () => {
+    expect(evidenceError({ chunkS: 1 })).toMatch(/Chunk length/);
+    expect(evidenceError({ chunkS: 31 })).toMatch(/Chunk length/);
+    expect(evidenceError({ chunkS: 7.5 })).toMatch(/Chunk length/);
+    expect(evidenceError({ chunkS: 10, overlapS: 10 })).toMatch(/Overlap .* 0 to 9/);
+    expect(evidenceError({ chunkS: 3 })).toMatch(/Overlap .* 0 to 2/);
+    expect(evidenceError({ overlapS: -1 })).toMatch(/Overlap/);
+    expect(evidenceError({ framesPerSecond: 0 })).toMatch(/Frames per second/);
+    expect(evidenceError({ framesPerSecond: 9, chunkS: 5 })).toMatch(/Frames per second/);
+    expect(evidenceError({ question: "  " })).toMatch(/question/);
+    expect(evidenceError({ cameras: [{ id: "overhead-cam", crop: { x: 10, y: 10, width: 0, height: 480 } }] })).toMatch(/crop of camera overhead-cam/);
+  });
+
+  it("reads an answer that starts with No as no hint", () => {
+    expect(isNegative("No")).toBe(true);
+    expect(isNegative(" No. The person scans every item.")).toBe(true);
+    expect(isNegative("Yes - snack packet - placed on the counter next to the scanner instead of scanning it")).toBe(false);
+    expect(isNegative("Nothing is scanned; a bottle is carried away.")).toBe(false);
   });
 });

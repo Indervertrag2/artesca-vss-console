@@ -256,6 +256,29 @@ for (const backend of backends) {
       expect(strip(got.find((s) => s.id === "sco")!)).toEqual(multi);
       // A single-camera scenario carries none of the fields.
       expect(Object.keys(got.find((s) => s.id === "plain")!)).not.toContain("mode");
+      // Nor does a multi-camera one gain evidence fields it was not written with.
+      expect(Object.keys(got.find((s) => s.id === "sco")!)).not.toContain("evidence");
+    });
+
+    it("round-trips a multi-camera scenario's evidence settings and a camera's crop (#60)", async () => {
+      const recorded: ScenarioEntry = {
+        ...scenario("sco"),
+        mode: "multi",
+        cameras: [{ id: "overhead-cam", crop: { x: 400, y: 200, width: 1100, height: 620 } }, { id: "scanner-cam" }],
+        sources: [{ id: "till-1", role: "clock" }],
+        rules: { matchToleranceS: 3, windowBeforeS: 30, windowAfterS: 20 },
+        evidence: "recording",
+        chunkS: 8,
+        overlapS: 3,
+        framesPerSecond: 5,
+        question: "Question: is a product carried away unscanned?\nAnswer with exactly No, or with Yes - <the product>.",
+        systemPrompt: "You watch a self-checkout.",
+      };
+      await store.writeScenarios(INSTANCE, [recorded], "me");
+      const [got] = (await store.readScenarios(INSTANCE)) as (ScenarioEntry & { updatedBy?: string; updatedAt?: string })[];
+      delete got.updatedBy;
+      delete got.updatedAt;
+      expect(got).toEqual(recorded);
     });
 
     // ── Prompt resolution: the active set wins over the legacy doc ───────────

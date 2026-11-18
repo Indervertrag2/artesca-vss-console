@@ -17,7 +17,7 @@ import {
   type ScenarioConfig,
 } from "@/lib/helpers/gcs-config";
 import { scenarioToGcsConfig } from "@/lib/helpers/scenarios-apply";
-import { multiFields } from "@/lib/purchase-judge";
+import { multiFields, refineEvidence } from "@/lib/purchase-judge";
 import fs from "fs/promises";
 import path from "path";
 
@@ -158,7 +158,7 @@ function buildGcsField(gcsCfg: ScenariosConfig | null) {
 // ─── PATCH ─────────────────────────────────────────────────────────────────────
 
 const PatchScenariosSchema = z.object({
-  scenarios: z.array(ScenarioSchema).min(1),
+  scenarios: z.array(ScenarioSchema.superRefine(refineEvidence)).min(1),
 });
 
 export const PATCH = withRequestContext(async (req: NextRequest) => {
@@ -171,7 +171,10 @@ export const PATCH = withRequestContext(async (req: NextRequest) => {
   const body = await req.json().catch(() => null);
   const parsed = PatchScenariosSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Validation failed", issues: parsed.error.issues }, { status: 400 });
+    // The first issue in words: the form shows `error`, and "Validation failed" alone says nothing.
+    const first = parsed.error.issues[0];
+    const error = first ? `Validation failed: ${first.path.join(".")}: ${first.message}` : "Validation failed";
+    return NextResponse.json({ error, issues: parsed.error.issues }, { status: 400 });
   }
 
   const { scenarios } = parsed.data;

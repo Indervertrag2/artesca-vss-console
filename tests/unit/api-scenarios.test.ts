@@ -101,6 +101,46 @@ describe("scenarios route (k8s)", () => {
     expect(written[0]).toMatchObject(multi);
     // Without mode "multi" the multi fields are not stored.
     expect(written[1]).not.toHaveProperty("cameras");
+    // A multi-camera scenario without evidence settings is stored as before (#60).
+    expect(written[0]).not.toHaveProperty("evidence");
+    expect(written[0]).not.toHaveProperty("chunkS");
+  });
+
+  it("GET and PATCH carry the evidence settings and a camera's crop, and PATCH says why a setting is refused (#60)", async () => {
+    const recorded = {
+      mode: "multi",
+      cameras: [{ id: "overhead-cam", crop: { x: 400, y: 200, width: 1100, height: 620 } }, { id: "scanner-cam" }],
+      sources: [{ id: "till-1", role: "clock" }],
+      rules: { matchToleranceS: 3, windowBeforeS: 30, windowAfterS: 20 },
+      evidence: "recording",
+      chunkS: 8,
+      overlapS: 3,
+      framesPerSecond: 5,
+      question: "Question: is a product carried away?",
+      systemPrompt: "You watch a self-checkout.",
+    };
+    const writeScenarios = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(makeReconcileContext).mockResolvedValue({
+      instance: "inst-1", adapter: {} as never, refs: { scenarios: {} } as never,
+      store: {
+        readScenarios: vi.fn().mockResolvedValue([{ id: "sco", name: "SCO", severity: "high", channels: ["ui"], sensor_filter: "*", keywords: [], enabled: true, ...recorded }]),
+        readCameras: vi.fn().mockResolvedValue([]),
+        readSources: vi.fn().mockResolvedValue([]),
+        writeScenarios,
+      } as never,
+    } as never);
+    expect((await (await GET()).json()).scenarios[0]).toMatchObject(recorded);
+
+    expect((await PATCH(patchReq({ scenarios: [{ ...SCEN, ...recorded }] }))).status).toBe(200);
+    expect((writeScenarios.mock.calls[0][1] as Record<string, unknown>[])[0]).toMatchObject(recorded);
+
+    // 16 s x 4 frames per second is more than the model takes per request.
+    const res = await PATCH(patchReq({ scenarios: [{ ...SCEN, ...recorded, chunkS: 16, framesPerSecond: 4 }] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/^Validation failed: scenarios\.0\.evidence: 16 s chunks at 4 frames per second are 64 frames per request; the model takes at most 60/);
+    const overlap = await PATCH(patchReq({ scenarios: [{ ...SCEN, ...recorded, overlapS: 8 }] }));
+    expect((await overlap.json()).error).toMatch(/Overlap must be a whole number of seconds from 0 to 7/);
+    expect(writeScenarios).toHaveBeenCalledTimes(1);
   });
 
   it("PATCH writes Firestore then applies write-through", async () => {

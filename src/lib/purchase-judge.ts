@@ -37,6 +37,10 @@ const ProductClassSchema = z
   .strict();
 export type ProductClass = z.infer<typeof ProductClassSchema>;
 
+const PX = z.number().int().min(0).max(16384);
+/** The part of a camera's picture the model is shown, in pixels of the source picture. */
+const CropSchema = z.object({ x: PX, y: PX, width: PX, height: PX }).strict();
+
 /**
  * The scenario fields of the multi-camera mode, shared by the client schema
  * (`ScenarioSchema`) and the strict restore schema (`FillScenarioSchema`). All
@@ -45,7 +49,7 @@ export type ProductClass = z.infer<typeof ProductClassSchema>;
 export const ScenarioMultiFields = {
   mode: z.enum(["single", "multi"]).optional(),
   cameras: z
-    .array(z.object({ id: ENTITY_ID, view: z.string().max(500).optional() }).strict())
+    .array(z.object({ id: ENTITY_ID, view: z.string().max(500).optional(), crop: CropSchema.optional() }).strict())
     .max(64)
     .optional(),
   sources: z
@@ -54,21 +58,40 @@ export const ScenarioMultiFields = {
     .optional(),
   rules: PurchaseRulesSchema.optional(),
   productClasses: z.array(ProductClassSchema).max(100).optional(),
+  // Where the hints come from. Absent or "live": the per-chunk alerts of the live
+  // stream. "recording": the recording of the purchase, cut into overlapping
+  // chunks (purchase-recording.ts). `evidenceError` checks the ranges, on every write.
+  evidence: z.enum(["live", "recording"]).optional(),
+  chunkS: z.number().optional(),
+  overlapS: z.number().optional(),
+  framesPerSecond: z.number().optional(),
+  question: z.string().max(2000).optional(),
+  systemPrompt: z.string().max(2000).optional(),
 };
 const ScenarioMultiSchema = z.object(ScenarioMultiFields);
 export type ScenarioMulti = z.infer<typeof ScenarioMultiSchema>;
 export type ScenarioCamera = NonNullable<ScenarioMulti["cameras"]>[number];
 
 /** The multi-camera fields of a scenario, or none at all for a single-camera one,
- *  so a single-camera scenario is stored exactly as before. */
+ *  so a single-camera scenario is stored exactly as before. The evidence fields
+ *  are stored only when set, so a scenario without them is stored as before too. */
 export function multiFields(s: ScenarioMulti): ScenarioMulti {
   if (s.mode !== "multi") return {};
+  const evidence: ScenarioMulti = {
+    evidence: s.evidence,
+    chunkS: s.chunkS,
+    overlapS: s.overlapS,
+    framesPerSecond: s.framesPerSecond,
+    question: s.question,
+    systemPrompt: s.systemPrompt,
+  };
   return {
     mode: "multi",
     cameras: s.cameras ?? [],
     sources: s.sources ?? [],
     rules: s.rules ?? DEFAULT_RULES,
     ...(s.productClasses ? { productClasses: s.productClasses } : {}),
+    ...Object.fromEntries(Object.entries(evidence).filter(([, v]) => v !== undefined)),
   };
 }
 
@@ -87,6 +110,77 @@ export const DEFAULT_PRODUCT_CLASSES: ProductClass[] = [
   },
   { pattern: "saft|juice|cola|coke|water|radler|bier|beer|limo|drink|flasche|bottle", form: "bottle" },
 ];
+
+// ─── Evidence from the recording ──────────────────────────────────────────────
+
+export const DEFAULT_QUESTION =
+  "Question: in these frames, does a person move a product past the scanner, or carry a product away from the checkout, without first moving that product over the scanner?\n" +
+  "Answer with exactly No, or with Yes - <the product> - <what the person did with it, in one short sentence>.";
+export const DEFAULT_SYSTEM_PROMPT =
+  "You are a retail video monitoring assistant. Report only relevant events for the alert type.";
+/** Frames the model takes per request: about 25.7 million pixels at 854x480. */
+export const MAX_FRAMES_PER_CHUNK = 60;
+
+export interface RecordingSettings {
+  chunkS: number;
+  overlapS: number;
+  framesPerSecond: number;
+  question: string;
+  systemPrompt: string;
+}
+
+/** A scenario's recording settings with the defaults filled in. */
+export function recordingSettings(s: ScenarioMulti): RecordingSettings {
+  return {
+    chunkS: s.chunkS ?? 10,
+    overlapS: s.overlapS ?? 4,
+    framesPerSecond: s.framesPerSecond ?? 4,
+    question: s.question ?? DEFAULT_QUESTION,
+    systemPrompt: s.systemPrompt || DEFAULT_SYSTEM_PROMPT,
+  };
+}
+
+/** Why a scenario's evidence settings cannot be used, in words for the operator; null when they can. */
+export function evidenceError(s: ScenarioMulti): string | null {
+  const r = recordingSettings(s);
+  const whole = (n: number, min: number, max: number) => Number.isInteger(n) && n >= min && n <= max;
+  if (!whole(r.chunkS, 2, 30)) return "Chunk length must be a whole number of seconds from 2 to 30.";
+  if (!whole(r.overlapS, 0, r.chunkS - 1)) {
+    return `Overlap must be a whole number of seconds from 0 to ${r.chunkS - 1}: shorter than the ${r.chunkS} s chunk.`;
+  }
+  if (!whole(r.framesPerSecond, 1, 8)) return "Frames per second must be a whole number from 1 to 8.";
+  const frames = r.chunkS * r.framesPerSecond;
+  if (frames > MAX_FRAMES_PER_CHUNK) {
+    return `${r.chunkS} s chunks at ${r.framesPerSecond} frames per second are ${frames} frames per request; the model takes at most ${MAX_FRAMES_PER_CHUNK}. Shorten the chunk or lower the frames per second.`;
+  }
+  if (!r.question.trim()) return "The question to the model is empty.";
+  const cropped = (s.cameras ?? []).find((c) => c.crop && !(c.crop.width > 0 && c.crop.height > 0));
+  if (cropped) return `The crop of camera ${cropped.id || "(no id)"} needs a width and a height.`;
+  return null;
+}
+
+/** `evidenceError` as a schema check, for the schemas a scenario is written through. */
+export function refineEvidence(s: ScenarioMulti, ctx: z.RefinementCtx): void {
+  const message = evidenceError(s);
+  if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["evidence"] });
+}
+
+/**
+ * The chunks a recording of `durationS` seconds is cut into, as offsets from its
+ * start: one every `chunkS - overlapS` seconds from 0, each `chunkS` long. The
+ * last one ends with the recording, moved back so that it is full length too. A
+ * recording shorter than a chunk is one chunk. Whole seconds, because the
+ * recording is cut at its keyframes, one per second.
+ */
+export function planChunks(durationS: number, chunkS: number, overlapS: number): { startS: number; endS: number }[] {
+  const total = Math.ceil(durationS);
+  if (total <= chunkS) return total > 0 ? [{ startS: 0, endS: total }] : [];
+  const step = Math.max(1, chunkS - overlapS);
+  const out: { startS: number; endS: number }[] = [];
+  for (let startS = 0; startS + chunkS < total; startS += step) out.push({ startS, endS: startS + chunkS });
+  out.push({ startS: total - chunkS, endS: total });
+  return out;
+}
 
 /** Gap that splits a purchase's scans into blocks; the window starts at the last block. */
 export const SCAN_BLOCK_GAP_S = 60;
@@ -256,6 +350,9 @@ const CARRY_AWAY =
 /** A "No" answer is not a hint, whatever else it says. */
 const NEGATIVE = /^\W*(no|nein)\b/;
 
+/** Whether a model's answer is a "No": then it is not a hint. */
+export const isNegative = (text: string) => NEGATIVE.test(normalize(text));
+
 const formsIn = (n: string) => PRODUCT_FORMS.filter((f) => FORM_WORDS[f].test(n));
 const coloursIn = (n: string) => Object.keys(COLOUR_WORDS).filter((c) => COLOUR_WORDS[c].test(n));
 
@@ -324,6 +421,12 @@ export interface PurchaseVerdict {
   /** Cameras with at least one unexplained hint. */
   camerasSaw: string[];
   summary: string;
+  /** Set when the hints came from the recording of the purchase; absent on a verdict
+   *  from the live alerts. With it: the chunking, and the chunks put to the model per camera. */
+  evidence?: "recording";
+  chunkS?: number;
+  overlapS?: number;
+  chunksAsked?: Record<string, number>;
 }
 
 export interface JudgeConfig {

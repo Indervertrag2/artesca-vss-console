@@ -125,9 +125,13 @@ export function clipWindow(
  * binary MP4 bytes (verified on the live alerts build).
  */
 export function buildVstClipUrl(streamId: string, ts: string, end?: string | null): string {
-  const base = process.env.VST_MS_URL ?? CLUSTER.vst.storageBase;
   const win = clipWindow(ts, end);
-  const start = win.start.toISOString();
-  const stop = win.end.toISOString();
-  return `${base}/storage/file/${encodeURIComponent(streamId)}?startTime=${encodeURIComponent(start)}&endTime=${encodeURIComponent(stop)}&container=mp4&disableAudio=true`;
+  return vstFileUrl(streamId, win.start, win.end);
+}
+
+/** The VST download URL of a stream's recording from `start` to `end`, as given:
+ *  no padding and no 60 s cap (a purchase window can be longer). */
+export function vstFileUrl(streamId: string, start: Date, end: Date): string {
+  const base = process.env.VST_MS_URL ?? CLUSTER.vst.storageBase;
+  return `${base}/storage/file/${encodeURIComponent(streamId)}?startTime=${encodeURIComponent(start.toISOString())}&endTime=${encodeURIComponent(end.toISOString())}&container=mp4&disableAudio=true`;
 }

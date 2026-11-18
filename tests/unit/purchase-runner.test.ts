@@ -22,8 +22,10 @@ import {
   scenarioPurchases,
   withPurchaseIncidents,
 } from "@/lib/purchase-runner";
+import { RecordingUnavailableError, type RecordingEvidence } from "@/lib/purchase-recording";
+import { getDb } from "@/lib/db";
 import type { ScenarioEntry } from "@/lib/config-store/types";
-import type { Hint, TillEvent } from "@/lib/purchase-judge";
+import type { Hint, PurchaseVerdict, TillEvent } from "@/lib/purchase-judge";
 import type { Incident } from "@/lib/types";
 
 afterAll(() => {
@@ -191,5 +193,138 @@ describe("re-evaluation", () => {
     await reevaluatePurchase(s, "63", { readTillEvents: read, fetchHintsBetween: async () => [] }, later);
     expect(listPurchaseIncidents(50).filter((i) => i.scenarioId === "h")).toHaveLength(0);
     expect(await reevaluatePurchase(s, "99", { readTillEvents: read, fetchHintsBetween: between }, later)).toBeNull();
+  });
+});
+
+// Issue #60: a scenario with `evidence: "recording"` takes its hints from the
+// recording of the purchase window. The recording itself (VST, ffmpeg, the VLM)
+// is purchase-recording.test.ts; here it is a function the runner is given.
+describe("evidence from the recording", () => {
+  const THEFT: Hint = {
+    cameraId: "scanner-cam",
+    start: `${D}17:42:57.000Z`,
+    end: `${D}17:43:07.000Z`,
+    text: "Yes - snack packet - placed on the counter next to the scanner instead of scanning it",
+  };
+  const EVIDENCE: RecordingEvidence = { hints: [THEFT], chunksAsked: { "overhead-cam": 10, "scanner-cam": 10 } };
+  const recorded = (id: string, extra: Partial<ScenarioEntry> = {}) => scenario(id, { evidence: "recording", ...extra });
+  const bridge = vi.fn(async () => HINTS);
+  const run = (now: number, recordingHints: typeof import("@/lib/purchase-recording").recordingHints) =>
+    evaluateDuePurchases({ ...deps(now, bridge), recordingHints });
+  const stored = (id: string) =>
+    listPurchaseIncidents(50)
+      .filter((i) => i.scenarioId === id)
+      .map((i) => (i.raw as { verdict: PurchaseVerdict }).verdict);
+
+  it("judges a purchase 60 s after its window closes, from the recording of the window and not the live alerts", async () => {
+    store.scenarios = [recorded("r1")];
+    const hints = vi.fn(async () => EVIDENCE);
+    // Purchase 63 closed 17:43:33, its window 17:43:53: the recording is complete at 17:44:53.
+    await run(at("17:44:52Z"), hints);
+    expect(hints).not.toHaveBeenCalled();
+    expect(await run(at("17:44:53Z"), hints)).toEqual([]);
+    expect(hints).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: "r1" }), {
+      start: `${D}17:42:51.000Z`,
+      end: `${D}17:43:53.000Z`,
+    });
+    await vi.waitFor(() => expect(purchaseStatus(["r1"]).r1).toMatchObject({ purchaseId: "63", incident: true }));
+    expect(bridge).not.toHaveBeenCalled();
+
+    const [v] = stored("r1");
+    expect(v).toMatchObject({ evidence: "recording", chunkS: 10, overlapS: 4, chunksAsked: EVIDENCE.chunksAsked, incident: true });
+    expect(v.hints).toEqual([expect.objectContaining({ ...THEFT, outcome: "remains" })]);
+    // Judged once: a later pass does not ask again.
+    await run(at("17:45:10Z"), hints);
+    expect(hints).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores the scenario's own chunking with the verdict, also when nothing was seen", async () => {
+    store.scenarios = [recorded("r2", { chunkS: 8, overlapS: 2 })];
+    await run(at("17:45:00Z"), async () => ({ hints: [], chunksAsked: { "overhead-cam": 11, "scanner-cam": 11 } }));
+    await vi.waitFor(() => expect(purchaseStatus(["r2"]).r2).toMatchObject({ purchaseId: "63", incident: false }));
+    const row = getDb()
+      .prepare("SELECT verdict_json FROM purchase_evaluations WHERE scenario_id = 'r2'")
+      .get() as { verdict_json: string };
+    expect(JSON.parse(row.verdict_json)).toMatchObject({ evidence: "recording", chunkS: 8, overlapS: 2, chunksAsked: { "scanner-cam": 11 } });
+  });
+
+  it("does not hold up the pass and does not start a running purchase twice", async () => {
+    store.scenarios = [recorded("r3"), scenario("r3-live")];
+    let finish!: (e: RecordingEvidence) => void;
+    const hints = vi.fn(() => new Promise<RecordingEvidence>((resolve) => (finish = resolve)));
+    // The pass returns while the recording is still being asked about, and judges the live scenario.
+    const first = await run(at("17:44:53Z"), hints);
+    expect(first.map((v) => [v.scenarioId, v.purchaseId])).toEqual([["r3-live", "63"]]);
+    await run(at("17:45:03Z"), hints);
+    await run(at("17:45:13Z"), hints);
+    expect(hints).toHaveBeenCalledTimes(1);
+    expect(purchaseStatus(["r3"])).toEqual({});
+
+    finish(EVIDENCE);
+    await vi.waitFor(() => expect(purchaseStatus(["r3"]).r3).toMatchObject({ purchaseId: "63", incident: true }));
+    await run(at("17:45:23Z"), hints);
+    expect(hints).toHaveBeenCalledTimes(1);
+  });
+
+  it("stores no verdict when a recording is missing, shows why, and tries again later", async () => {
+    store.scenarios = [recorded("r4")];
+    const missing = new RecordingUnavailableError("VST has no recording of camera scanner-cam for the purchase window");
+    const hints = vi.fn<() => Promise<RecordingEvidence>>().mockRejectedValueOnce(missing).mockResolvedValue(EVIDENCE);
+    await run(at("17:44:53Z"), hints);
+    await vi.waitFor(() => expect(purchaseStatus(["r4"]).r4).toEqual({ error: missing.message }));
+    expect(stored("r4")).toEqual([]);
+
+    // Not on the next pass, 10 s later, but 30 s after the failed one; the error stays until then.
+    await run(at("17:45:03Z"), hints);
+    expect(hints).toHaveBeenCalledTimes(1);
+    expect(purchaseStatus(["r4"]).r4).toEqual({ error: missing.message });
+    await run(at("17:45:23Z"), hints);
+    expect(hints).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(purchaseStatus(["r4"]).r4).toMatchObject({ purchaseId: "63", incident: true }));
+    expect(purchaseStatus(["r4"]).r4.error).toBeUndefined();
+  });
+
+  it("stores no verdict when the VLM fails, and gives the purchase up after 30 minutes", async () => {
+    store.scenarios = [recorded("r5")];
+    const hints = vi.fn(async (): Promise<RecordingEvidence> => Promise.reject(new Error("HTTP 500: model overloaded")));
+    await run(at("17:44:53Z"), hints);
+    await vi.waitFor(() => expect(purchaseStatus(["r5"]).r5).toEqual({ error: "HTTP 500: model overloaded" }));
+    // The gaps between attempts double: 30 s, 30 s, 60 s, so a recording is not re-encoded on every pass.
+    for (const [time, attempts] of [["17:45:13Z", 1], ["17:45:23Z", 2], ["17:45:53Z", 3], ["17:46:43Z", 3], ["17:46:53Z", 4]] as const) {
+      await run(at(time), hints);
+      await new Promise((r) => setImmediate(r));
+      expect(hints).toHaveBeenCalledTimes(attempts);
+    }
+    expect(stored("r5")).toEqual([]);
+    hints.mockClear();
+    // 18:21: both purchases of the till closed more than 30 minutes ago.
+    await run(at("18:21:00Z"), hints);
+    expect(hints).not.toHaveBeenCalled();
+    expect(purchaseStatus(["r5"])).toEqual({});
+    expect(stored("r5")).toEqual([]);
+  });
+
+  it("re-evaluates from the recording, and says when VST no longer has it", async () => {
+    const s = recorded("r6");
+    const read = deps(0).readTillEvents;
+    const between = vi.fn(async () => HINTS);
+    const hints = vi.fn(async () => EVIDENCE);
+    const v = await reevaluatePurchase(s, "63", { readTillEvents: read, fetchHintsBetween: between, recordingHints: hints }, new Date(at("18:00:00Z")));
+    expect(v).toMatchObject({ incident: true, evidence: "recording", chunksAsked: EVIDENCE.chunksAsked });
+    expect(hints).toHaveBeenCalledWith(s, { start: `${D}17:42:51.000Z`, end: `${D}17:43:53.000Z` });
+    expect(between).not.toHaveBeenCalled();
+    expect(stored("r6")).toHaveLength(1);
+
+    // Hours later VST has dropped the recording: a clear error, and the stored verdict stays.
+    const gone = async (): Promise<RecordingEvidence> =>
+      Promise.reject(new RecordingUnavailableError("VST has no recording of camera overhead-cam for the purchase window"));
+    await expect(
+      reevaluatePurchase(s, "63", { readTillEvents: read, fetchHintsBetween: between, recordingHints: gone }, new Date(at("23:00:00Z"))),
+    ).rejects.toThrow(/^recording no longer available \(VST has no recording of camera overhead-cam/);
+    expect(stored("r6")).toHaveLength(1);
+    // Inside the minute VST needs, a missing recording is late, not gone.
+    await expect(
+      reevaluatePurchase(s, "63", { readTillEvents: read, fetchHintsBetween: between, recordingHints: gone }, new Date(at("17:44:00Z"))),
+    ).rejects.toThrow(/^VST has no recording/);
   });
 });
