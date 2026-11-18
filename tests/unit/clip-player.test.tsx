@@ -237,6 +237,37 @@ describe("ClipPlayer fallback states", () => {
     expect(getByTestId(container, "clip-unavailable")).toBeNull();
   });
 
+  // ── 5b. Each transient error retries with a new Hls, then gives up ─────────
+
+  it("retries after each transient error and falls back once retries are exhausted", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "no recording" }, { status: 404 })));
+    await act(async () => {
+      root.render(
+        <ClipPlayer
+          src="/api/clips/cam/ts/index.m3u8"
+          clipStatus="pending"
+          fallbackMeta={META}
+        />
+      );
+    });
+    expect(HlsMock._getCallCount()).toBe(1);
+
+    for (let attempt = 2; attempt <= 4; attempt++) {
+      await act(async () => {
+        HlsMock._getHandler()?.(null, { fatal: true, details: "manifestLoadError" });
+      });
+      expect(getByTestId(container, "clip-materialising")).not.toBeNull();
+      await act(async () => { vi.advanceTimersByTime(4_100); });
+      expect(HlsMock._getCallCount()).toBe(attempt);
+    }
+
+    await act(async () => {
+      HlsMock._getHandler()?.(null, { fatal: true, details: "manifestLoadError" });
+    });
+    expect(getByTestId(container, "clip-unavailable")).not.toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   // ── 6. Normal render: video element present, no fallback shown ────────────
 
   it("renders the video element (not a fallback) when no error occurs", async () => {

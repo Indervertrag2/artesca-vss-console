@@ -114,12 +114,13 @@ function UnavailableFallback({
 }
 
 // ─── Materialising spinner — transient "clip not yet ready" state ─────────────
+// An overlay over the <video>, which stays mounted so a retry can attach to it.
 
 function MaterialisingFallback() {
   return (
     <div
       data-testid="clip-materialising"
-      className="flex items-center justify-center gap-2 rounded border border-border bg-muted/40 p-4"
+      className="absolute inset-0 flex items-center justify-center gap-2 bg-black"
     >
       <svg
         className="h-4 w-4 animate-spin text-muted-foreground"
@@ -229,6 +230,9 @@ export function ClipPlayer({ src, seekOffset, clipStatus, fallbackMeta }: ClipPl
   useEffect(() => {
     if (!hlsError || !isTransient) return;
     const timer = setTimeout(() => {
+      // Clear the error with the bump: the last retry would otherwise render the
+      // exhausted fallback (and unmount the <video>) before it loads.
+      setHlsError(null);
       setRetryCount((n) => n + 1);
     }, RETRY_DELAY_MS);
     return () => clearTimeout(timer);
@@ -315,18 +319,17 @@ export function ClipPlayer({ src, seekOffset, clipStatus, fallbackMeta }: ClipPl
     return <UnavailableFallback meta={fallbackMeta} technical={serverDiag ?? undefined} />;
   }
 
-  // ── Render: HLS error ─────────────────────────────────────────────────────
-  if (hlsError) {
-    if (isTransient) {
-      // Clip is still materialising or early retry — show spinner.
-      return <MaterialisingFallback />;
-    }
-    // Exhausted retries → data-only fallback. Prefer the backend's diagnostic
-    // (VST reason) over the generic HLS error string.
+  // ── Render: HLS error, retries exhausted ──────────────────────────────────
+  if (hlsError && !isTransient) {
+    // Data-only fallback. Prefer the backend's diagnostic (VST reason) over the
+    // generic HLS error string.
     return (
       <UnavailableFallback meta={fallbackMeta} technical={serverDiag ?? hlsError} />
     );
   }
+
+  // Clip still materialising: a transient error, or a retry still loading.
+  const preparing = hlsError != null || (retryCount > 0 && !ready);
 
   // ── Render: normal player ─────────────────────────────────────────────────
   return (
@@ -338,7 +341,9 @@ export function ClipPlayer({ src, seekOffset, clipStatus, fallbackMeta }: ClipPl
         playsInline
         muted
       />
-      {!ready && (
+      {preparing ? (
+        <MaterialisingFallback />
+      ) : !ready && (
         <div className="absolute inset-0 flex items-center justify-center">
           <span className="text-xs text-muted-foreground animate-pulse">
             Loading clip…
