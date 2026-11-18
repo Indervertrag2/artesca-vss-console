@@ -3,6 +3,7 @@ import { auth } from "@/lib/auth";
 import { z } from "zod";
 import { withRequestContext } from "@/lib/with-request-context";
 import { CLUSTER } from "@/lib/cluster-refs";
+import { chatCompletion, ChatCompletionHttpError } from "@/lib/helpers/chat-completions";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +24,6 @@ export const POST = withRequestContext(async function (req: NextRequest) {
 
   const { prompt, userMessage } = parsed.data;
 
-  const previewEndpoint =
-    `${process.env.NIM_PREVIEW_ENDPOINT ?? CLUSTER.nim.previewEndpoint}/v1/chat/completions`;
-
   const previewModel =
     process.env.NIM_PREVIEW_MODEL ?? "nvila-lite-2b";
 
@@ -42,33 +40,18 @@ export const POST = withRequestContext(async function (req: NextRequest) {
   const startMs = Date.now();
 
   try {
-    const resp = await fetch(previewEndpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(60_000),
-    });
-
-    const latencyMs = Date.now() - startMs;
-
-    if (!resp.ok) {
-      const errBody = await resp.text();
+    const { content, model } = await chatCompletion(
+      process.env.NIM_PREVIEW_ENDPOINT ?? CLUSTER.nim.previewEndpoint,
+      payload,
+    );
+    return NextResponse.json({ response: content, latencyMs: Date.now() - startMs, model: model ?? previewModel });
+  } catch (err) {
+    if (err instanceof ChatCompletionHttpError) {
       return NextResponse.json(
-        { error: `Preview NIM returned HTTP ${resp.status}: ${errBody}` },
+        { error: `Preview NIM returned HTTP ${err.status}: ${err.body}` },
         { status: 502 }
       );
     }
-
-    const json = await resp.json() as {
-      choices?: Array<{ message?: { content?: string } }>;
-      model?: string;
-    };
-
-    const response = json.choices?.[0]?.message?.content ?? "";
-    const model = json.model ?? previewModel;
-
-    return NextResponse.json({ response, latencyMs, model });
-  } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       { error: `Preview NIM unreachable: ${msg}` },

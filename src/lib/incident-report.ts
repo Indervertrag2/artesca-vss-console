@@ -5,6 +5,7 @@ import { AGENT_DEPLOYMENT_NAME, collectAgentBehavior } from "@/lib/agent-config"
 import { loadIncidentReport, saveIncidentReport } from "@/lib/db";
 import { isHostedClaudeBaseUrl } from "@/lib/agent-presets";
 import { modelAnswer } from "@/lib/helpers/incident-wire";
+import { chatCompletion, ChatCompletionHttpError } from "@/lib/helpers/chat-completions";
 
 /**
  * incident-report.ts — synthesizes a structured markdown incident report
@@ -168,7 +169,6 @@ async function callReportLlm(
   info: ExtractedIncidentInfo,
 ): Promise<string> {
   const apiKey = await resolveAgentApiKey(baseUrl);
-  const url = `${baseUrl.replace(/\/+$/, "")}/v1/chat/completions`;
 
   // Claude 4.6+ rejects `temperature` on the OpenAI-compatible chat surface,
   // and OpenRouter forwards the body to Anthropic unchanged — same gotcha as
@@ -187,24 +187,12 @@ async function callReportLlm(
   // The OpenAI-compatible /v1/chat/completions surface (unlike the native
   // /v1/models probe in gpu-allocation.ts) authenticates the same way for
   // both NIM and OpenRouter — a plain Bearer token.
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (apiKey) headers.authorization = `Bearer ${apiKey}`;
-
-  const resp = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
+  const { content } = await chatCompletion(baseUrl, body, {
+    headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+  }).catch((err: unknown) => {
+    throw err instanceof ChatCompletionHttpError ? new Error(`LLM ${err.message}`) : err;
   });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new Error(`LLM HTTP ${resp.status}: ${text.slice(0, 300)}`);
-  }
-  const data = (await resp.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const content = data.choices?.[0]?.message?.content;
-  if (!content || !content.trim()) throw new Error("LLM returned an empty response");
+  if (!content.trim()) throw new Error("LLM returned an empty response");
   return content.trim();
 }
 
