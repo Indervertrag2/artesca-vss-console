@@ -64,11 +64,11 @@ export function TestFootagePanel() {
   // exactly those and nothing else.
   const [paused, setPaused] = React.useState<string[]>([]);
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["test-footage"],
     queryFn: async () => {
       const res = await fetch("/api/test-footage");
-      if (!res.ok) throw new Error("could not load test footage");
+      if (!res.ok) throw new Error(`could not load test footage (HTTP ${res.status})`);
       return ResponseSchema.parse(await res.json());
     },
     refetchInterval: 10_000,
@@ -342,6 +342,20 @@ export function TestFootagePanel() {
         <div className="flex items-center gap-2 text-muted-foreground py-6 justify-center">
           <Loader2 className="h-5 w-5 animate-spin" />
           <span>Loading footage…</span>
+        </div>
+      )}
+
+      {isError && (
+        <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+          <span>{error.message}</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto h-7 px-2 text-xs"
+            onClick={() => void refetch()}
+          >
+            Retry
+          </Button>
         </div>
       )}
 
