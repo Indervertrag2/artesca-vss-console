@@ -107,13 +107,14 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
             <h3 className="text-xs font-medium uppercase text-muted-foreground">Cameras</h3>
             {v.cameras.map((c) => (
               <div key={c.id} className="rounded border border-border p-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs">
+                {/* The text wraps, the button never does: every camera's button sits in the same right-hand column. */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 pt-1.5 text-xs">
                     <span className="font-mono">{c.id}</span>
                     {c.view && <span className="ml-2 text-muted-foreground">{c.view}</span>}
                     <span className="ml-2">{v.camerasSaw.includes(c.id) ? "saw it" : "no unexplained hint"}</span>
                   </div>
-                  <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[11px]" onClick={() => toggle(c.id)}>
+                  <Button type="button" variant="outline" size="sm" className="h-7 w-24 shrink-0 px-2 text-[11px]" onClick={() => toggle(c.id)}>
                     <Video className="mr-1.5 h-3 w-3" />
                     {open.has(c.id) ? "Close clip" : "Open clip"}
                   </Button>
