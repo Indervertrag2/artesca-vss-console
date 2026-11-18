@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
@@ -45,6 +46,8 @@ export type PlaybackMode = "loop" | "once";
 export interface FootageFile {
   /** Sanitised on-disk name; also the RTSP path segment. */
   name: string;
+  /** Camera id a run of this file registers (footageCameraId). */
+  cameraId: string;
   sizeBytes: number;
   uploadedAt: string;
 }
@@ -90,10 +93,16 @@ export function sanitiseFilename(raw: string): string {
 }
 
 /** Camera id a run registers in VST. Prefixed so it is obviously synthetic in
- *  the camera list, the incident feed and any scenario sensor filter. */
+ *  the camera list, the incident feed and any scenario sensor filter, and at
+ *  most 32 characters. A short .mp4 name keeps its plain id; any other name
+ *  would lose part of itself (a cut stem, the extension), so its id ends in a
+ *  hash of the full name instead — clip.mp4 and clip.mkv, or two names that
+ *  differ past the cut, shared an id, and starting one tore down the other. */
 export function footageCameraId(fileName: string): string {
-  const stem = fileName.replace(/\.[^.]+$/, "");
-  return `test-${stem}`.slice(0, 32);
+  const id = `test-${fileName.replace(/\.[^.]+$/, "")}`;
+  if (id.length <= 32 && fileName.endsWith(".mp4")) return id;
+  const hash = createHash("sha256").update(fileName).digest("hex").slice(0, 6);
+  return `${id.slice(0, 25).replace(/-+$/, "")}-${hash}`;
 }
 
 /** RTSP URL the replay server answers for this file in the requested mode. */
@@ -128,6 +137,7 @@ export async function listFootage(): Promise<FootageFile[]> {
       if (!st.isFile()) continue;
       files.push({
         name,
+        cameraId: footageCameraId(name),
         sizeBytes: st.size,
         uploadedAt: st.mtime.toISOString(),
       });
@@ -203,7 +213,7 @@ export async function saveFootage(
   }
 
   const st = await stat(target);
-  return { name: fileName, sizeBytes: st.size, uploadedAt: st.mtime.toISOString() };
+  return { name: fileName, cameraId: footageCameraId(fileName), sizeBytes: st.size, uploadedAt: st.mtime.toISOString() };
 }
 
 export async function deleteFootage(fileName: string): Promise<void> {

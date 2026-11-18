@@ -60,6 +60,22 @@ describe("footageCameraId", () => {
   it("stays within VST's practical name length", () => {
     expect(footageCameraId(`${"b".repeat(80)}.mp4`).length).toBeLessThanOrEqual(32);
   });
+
+  it("never gives two files the same id", () => {
+    const names = [
+      "sample-scenario-recording-01.mp4",
+      "sample-scenario-recording-02.mp4",
+      "clip.mp4",
+      "clip.mkv",
+      "clip.ts",
+    ];
+    const ids = names.map(footageCameraId);
+    expect(new Set(ids).size).toBe(names.length);
+    for (const id of ids) {
+      expect(id.length).toBeLessThanOrEqual(32);
+      expect(isFootageCamera(id)).toBe(true);
+    }
+  });
 });
 
 describe("footageRtspUrl", () => {
