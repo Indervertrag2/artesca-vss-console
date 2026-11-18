@@ -2,6 +2,7 @@ import { auth } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { isKioskAllowed, isApiOrInternal } from "@/lib/kiosk";
+import { isEventInputRequest } from "@/lib/sources";
 
 const PUBLIC_PATHS = [
   "/sign-in",
@@ -56,7 +57,9 @@ export default auth((req) => {
     return withRequestId(response, reqId);
   }
 
-  if (isPublic(pathname)) {
+  // An external source posting an event has no session; the route checks the
+  // source's token instead. Only POST on /api/sources/<id>/events passes.
+  if (isPublic(pathname) || isEventInputRequest(req.method, pathname)) {
     const response = NextResponse.next();
     response.headers.set("x-request-id", reqId);
     return response;

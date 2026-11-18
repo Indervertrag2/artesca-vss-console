@@ -2,6 +2,7 @@ import { type ReadonlyHeaders } from "next/dist/server/web/spec-extension/adapte
 
 export const KIOSK_HIDDEN_ROUTES = [
   "/cameras",
+  "/cameras/sources",
   "/scenarios",
   "/prompt",
   "/tuning",

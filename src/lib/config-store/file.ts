@@ -13,6 +13,7 @@ import type {
   PromptDoc,
   PromptSet,
   ScenarioEntry,
+  SourceEntry,
 } from "@/lib/config-store/types";
 
 /**
@@ -47,6 +48,9 @@ export interface ConfigDoc {
   cameras: Record<string, unknown>[];
   scenarios: Record<string, unknown>[];
   promptSets: Record<string, unknown>[];
+  /** External sources (tills, scales). Optional on disk: a file written before
+   *  sources existed reads as having none. */
+  sources: Record<string, unknown>[];
 }
 
 export class ConfigFileError extends Error {
@@ -85,7 +89,7 @@ export function configFilePath(instance: string, dir = configDir()): string {
 }
 
 function emptyDoc(instance: string): ConfigDoc {
-  return { schema: CONFIG_SCHEMA, instance, cameras: [], scenarios: [], promptSets: [] };
+  return { schema: CONFIG_SCHEMA, instance, cameras: [], scenarios: [], promptSets: [], sources: [] };
 }
 
 /**
@@ -105,7 +109,7 @@ function validateDoc(raw: unknown, instance: string, where: string): ConfigDoc {
   }
   const doc = raw as Record<string, unknown>;
 
-  const list = (key: "cameras" | "scenarios" | "promptSets"): Record<string, unknown>[] => {
+  const list = (key: "cameras" | "scenarios" | "promptSets" | "sources"): Record<string, unknown>[] => {
     const v = doc[key];
     if (v === undefined || v === null) return [];
     if (!Array.isArray(v)) throw new ConfigFileError(`${where}: "${key}" must be a list, got ${typeof v}`);
@@ -144,6 +148,7 @@ function validateDoc(raw: unknown, instance: string, where: string): ConfigDoc {
     cameras: list("cameras"),
     scenarios: list("scenarios"),
     promptSets: list("promptSets"),
+    sources: list("sources"),
   };
 }
 
@@ -405,6 +410,26 @@ export class FileConfigStore implements ConfigStore {
   async setActivePromptId(instance: string, id: string, updatedBy: string): Promise<void> {
     await this.mutate(instance, updatedBy, (doc) => {
       doc.activePromptId = id;
+    });
+  }
+
+  async readSources(instance: string): Promise<SourceEntry[]> {
+    return (await this.read(instance)).sources as unknown as SourceEntry[];
+  }
+
+  async upsertSource(instance: string, source: SourceEntry, updatedBy: string): Promise<void> {
+    await this.mutate(instance, updatedBy, (doc) => {
+      // Whole-entity replace, not a field merge — see the class comment.
+      const next = { ...source, ...stamp(updatedBy) };
+      const i = doc.sources.findIndex((s) => s.id === source.id);
+      if (i === -1) doc.sources.push(next);
+      else doc.sources[i] = next;
+    });
+  }
+
+  async deleteSource(instance: string, id: string, updatedBy: string): Promise<void> {
+    await this.mutate(instance, updatedBy, (doc) => {
+      doc.sources = doc.sources.filter((s) => s.id !== id);
     });
   }
 

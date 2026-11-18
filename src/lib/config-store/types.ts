@@ -24,6 +24,29 @@ export interface ScenarioEntry {
   cooldown_seconds?: number;
 }
 
+/**
+ * An external source: an input that is not a camera (a till, a scale). It pushes
+ * its events to `POST /api/sources/<id>/events`, authenticated by its token.
+ *
+ * Only the SHA-256 of the token is stored. The token is 32 random bytes, so a
+ * plain hash is enough, and the token itself is shown once, on create or rotate.
+ */
+export interface SourceEntry {
+  id: string;
+  name: string;
+  type: "till" | "scale" | "generic";
+  /** Base URL for the health probe (`GET <baseUrl>/api/health`). */
+  baseUrl?: string;
+  lane?: string;
+  /** How events arrive. Absent = push. `pull` and `both` need a till with a baseUrl:
+   *  the console then reads its sessions and scans every few seconds. */
+  mode?: "push" | "pull" | "both";
+  tokenHash: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 /** Convergence status the reconciler writes back after each run. */
 export interface ReconcileStatus {
   /** ISO timestamp of the last reconcile run. */
@@ -84,4 +107,8 @@ export interface ConfigStore {
   deletePromptSet(instance: string, id: string, updatedBy: string): Promise<void>;
   readActivePromptId(instance: string): Promise<string | null>;
   setActivePromptId(instance: string, id: string, updatedBy: string): Promise<void>;
+  readSources(instance: string): Promise<SourceEntry[]>;
+  /** Add or replace a single source. Replaces the whole entity, like upsertCamera. */
+  upsertSource(instance: string, source: SourceEntry, updatedBy: string): Promise<void>;
+  deleteSource(instance: string, id: string, updatedBy: string): Promise<void>;
 }

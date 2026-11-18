@@ -56,6 +56,10 @@ export async function register() {
   if (instance) {
     const { startReconcileLoop } = await import("@/lib/reconcile-agent");
     await startReconcileLoop({ periodic: !reconcileLoopDisabled });
+    // Pull mode for external sources. Here, in the console pod, because the
+    // events land in this pod's SQLite file; /cameras/sources shows its state.
+    const { startSourcePoller } = await import("@/lib/source-poll");
+    startSourcePoller(instance);
   }
 }
 

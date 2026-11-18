@@ -13,6 +13,7 @@
       "/about",
       "/agent",
       "/cameras",
+      "/cameras/sources",
       "/diagnostics",
       "/evidence",
       "/logs",
@@ -35,17 +36,17 @@
       "/storage",
       "/topology"
     ],
-    "apiRoutes": 70,
-    "mutatingCount": 34,
-    "guardedCount": 18,
+    "apiRoutes": 74,
+    "mutatingCount": 38,
+    "guardedCount": 21,
     "backendCounts": {
-      "k8s": 33,
+      "k8s": 37,
       "ssh": 2,
       "s3": 15,
       "kafka": 6,
       "redis": 1,
-      "config-store": 13,
-      "helpers/gcs-config": 17
+      "config-store": 17,
+      "helpers/gcs-config": 21
     },
     "configStoreKeys": [
       "defaultKind",
@@ -57,7 +58,8 @@
       "writes"
     ],
     "guardExempt": [
-      "/api/settings/kiosk"
+      "/api/settings/kiosk",
+      "/api/sources/[id]/events"
     ],
     "orphaned": []
   },

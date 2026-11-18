@@ -103,6 +103,11 @@ describe("isKioskAllowed — middleware page guard", () => {
     expect(isKioskAllowed("/cameras/bindings")).toBe(false);
   });
 
+  it("blocks /cameras/sources, which is on the hidden list", () => {
+    expect(isKioskAllowed("/cameras/sources")).toBe(false);
+    expect(KIOSK_HIDDEN_ROUTES).toContain("/cameras/sources");
+  });
+
   it("blocks /scenarios", () => {
     expect(isKioskAllowed("/scenarios")).toBe(false);
   });

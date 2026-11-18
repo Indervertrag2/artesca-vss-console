@@ -18,7 +18,7 @@ import path from "path";
 
 import { FileConfigStore, ConfigFileError, configFilePath } from "@/lib/config-store/file";
 import { FirestoreConfigStore, type FirestoreLike } from "@/lib/config-store/firestore";
-import type { ConfigStore, CameraEntry, ScenarioEntry, PromptSet } from "@/lib/config-store/types";
+import type { ConfigStore, CameraEntry, ScenarioEntry, PromptSet, SourceEntry } from "@/lib/config-store/types";
 import { emptyStatus } from "@/lib/config-store/types";
 
 // ─── An in-memory Firestore that behaves like the real one ───────────────────
@@ -85,6 +85,15 @@ const scenario = (id: string): ScenarioEntry => ({
   enabled: true,
 });
 const promptSet = (id: string, text = "watch the door"): PromptSet => ({ id, name: id, text });
+const source = (id: string, extra: Partial<SourceEntry> = {}): SourceEntry => ({
+  id,
+  name: id,
+  type: "till",
+  tokenHash: "ab".repeat(32),
+  enabled: true,
+  createdAt: "2026-11-18T10:00:00.000Z",
+  ...extra,
+});
 
 interface Backend {
   name: string;
@@ -131,6 +140,7 @@ for (const backend of backends) {
       expect(await store.readStatus(INSTANCE)).toBeNull();
       expect(await store.readPrompt(INSTANCE)).toBeNull();
       expect(await store.readActivePromptId(INSTANCE)).toBeNull();
+      expect(await store.readSources(INSTANCE)).toEqual([]);
     });
 
     it("round-trips cameras, preserving id and rtspUrl", async () => {
@@ -290,6 +300,39 @@ for (const backend of backends) {
       expect((await store.readPromptSets(INSTANCE)).map((s) => s.id)).toEqual(["default"]);
     });
 
+    // ── External sources ─────────────────────────────────────────────────────
+
+    it("upsertSource adds, then replaces in place without duplicating", async () => {
+      await store.upsertSource(INSTANCE, source("till-1", { name: "one" }), "me");
+      await store.upsertSource(INSTANCE, source("till-1", { name: "two", enabled: false }), "me");
+      const got = await store.readSources(INSTANCE);
+      expect(got).toHaveLength(1);
+      expect(got[0]).toMatchObject({ id: "till-1", name: "two", type: "till", enabled: false });
+      expect(got[0].tokenHash).toBe("ab".repeat(32));
+    });
+
+    it("upsertSource REPLACES the entity: an omitted baseUrl or lane is gone, not kept", async () => {
+      // The edit route clears an optional field by leaving it out of the object
+      // it upserts, exactly as the camera route unbinds a prompt.
+      await store.upsertSource(INSTANCE, source("till-1", { baseUrl: "http://till:8181", lane: "lane-1" }), "me");
+      const next = { ...(await store.readSources(INSTANCE))[0] };
+      delete next.baseUrl;
+      delete next.lane;
+      await store.upsertSource(INSTANCE, next, "me");
+      const got = (await store.readSources(INSTANCE))[0];
+      expect(got.baseUrl).toBeUndefined();
+      expect(got.lane).toBeUndefined();
+    });
+
+    it("deleteSource removes only its own source and leaves cameras alone", async () => {
+      await store.writeCameras(INSTANCE, [cam("a")], "me");
+      await store.upsertSource(INSTANCE, source("till-1"), "me");
+      await store.upsertSource(INSTANCE, source("scale-1", { type: "scale" }), "me");
+      await store.deleteSource(INSTANCE, "till-1", "me");
+      expect((await store.readSources(INSTANCE)).map((s) => s.id)).toEqual(["scale-1"]);
+      expect((await store.readCameras(INSTANCE)).map((c) => c.id)).toEqual(["a"]);
+    });
+
     it("does not lose a camera when many upserts race", async () => {
       const ids = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8"];
       await Promise.all(ids.map((id) => store.upsertCamera(INSTANCE, cam(id), "operator")));
@@ -377,6 +420,8 @@ describe("FileConfigStore — file-level behaviour", () => {
     );
     const got = (await store.readCameras("inst-a")) as unknown as Record<string, unknown>[];
     expect(got[0].somethingNew).toBe(42);
+    // Written before sources existed: no key at all reads as no sources.
+    expect(await store.readSources("inst-a")).toEqual([]);
   });
 
   it("leaves no lock or temp file behind after a write", async () => {

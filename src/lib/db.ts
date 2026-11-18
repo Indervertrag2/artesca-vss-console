@@ -67,6 +67,23 @@ export function getDb(): Database.Database {
       generated_at TEXT NOT NULL,
       PRIMARY KEY (sensor_id, ts)
     );
+
+    -- Events pushed by external sources (source-events.ts), kept 7 days.
+    CREATE TABLE IF NOT EXISTS source_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_id    TEXT NOT NULL,
+      received_at  TEXT NOT NULL,
+      event        TEXT NOT NULL,
+      ts           TEXT,
+      seq          INTEGER,
+      lane         TEXT,
+      gap          INTEGER NOT NULL DEFAULT 0,
+      dedupe_key   TEXT,
+      payload_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS source_events_by_source ON source_events (source_id, id);
+    CREATE INDEX IF NOT EXISTS source_events_by_key ON source_events (source_id, dedupe_key);
+    CREATE INDEX IF NOT EXISTS source_events_by_received ON source_events (received_at);
   `);
 
   if (!_signalHandlersRegistered) {

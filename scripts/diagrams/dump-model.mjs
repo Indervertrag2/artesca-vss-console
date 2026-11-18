@@ -68,7 +68,7 @@ function parseConfigStore() {
   const firestorePaths = [...fs.matchAll(/=>\s*`(instances\/\$\{instance\}[^`]*)`/g)]
     .map((m) => m[1].replace('${instance}', '<instance>'));
   const file = read('src/lib/config-store/file.ts');
-  const fileEntities = [...file.matchAll(/^\s{2}(cameras|scenarios|promptSets): Record/gm)].map((m) => m[1]);
+  const fileEntities = [...file.matchAll(/^\s{2}(cameras|scenarios|promptSets|sources): Record/gm)].map((m) => m[1]);
 
   return {
     methods,
@@ -186,6 +186,7 @@ const orphaned = navHrefs.filter((h) => !kiosk.hidden.includes(h) && !kiosk.allo
  */
 const GUARD_EXEMPT = {
   '/api/settings/kiosk': 'the exit from kiosk mode — guarding it would trap the session',
+  '/api/sources/[id]/events': 'posted by the source itself with its token, never by a browser session',
 };
 
 // A mutating route whose own page kiosk hides, but which accepts the write

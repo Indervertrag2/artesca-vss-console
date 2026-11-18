@@ -48,6 +48,9 @@ function store(): ConfigStore {
     deletePromptSet: async () => {},
     readActivePromptId: async () => null,
     setActivePromptId: async () => {},
+    readSources: async () => [],
+    upsertSource: async () => {},
+    deleteSource: async () => {},
   };
 }
 

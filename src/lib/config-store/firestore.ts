@@ -7,6 +7,7 @@ import type {
   PromptDoc,
   PromptSet,
   ScenarioEntry,
+  SourceEntry,
 } from "@/lib/config-store/types";
 
 /**
@@ -32,6 +33,7 @@ const camerasPath = (instance: string) => `instances/${instance}/cameras`;
 const instanceDocPath = (instance: string) => `instances/${instance}`;
 const scenariosPath = (instance: string) => `instances/${instance}/scenarios`;
 const promptsPath = (instance: string) => `instances/${instance}/prompts`;
+const sourcesPath = (instance: string) => `instances/${instance}/sources`;
 
 /**
  * Firestore-backed ConfigStore. Data model:
@@ -173,6 +175,23 @@ export class FirestoreConfigStore implements ConfigStore {
       const { id, ...rest } = scenario;
       await col.doc(id).set({ ...rest, updatedBy, updatedAt });
     }
+  }
+
+  async readSources(instance: string): Promise<SourceEntry[]> {
+    const snap = await this.db.collection(sourcesPath(instance)).get();
+    return snap.docs.map((d) => ({ ...(d.data() as Omit<SourceEntry, "id">), id: d.id }));
+  }
+
+  async upsertSource(instance: string, source: SourceEntry, updatedBy: string): Promise<void> {
+    const { id, ...rest } = source;
+    await this.db
+      .collection(sourcesPath(instance))
+      .doc(id)
+      .set({ ...rest, updatedBy, updatedAt: new Date().toISOString() });
+  }
+
+  async deleteSource(instance: string, id: string, _updatedBy: string): Promise<void> {
+    await this.db.collection(sourcesPath(instance)).doc(id).delete();
   }
 }
 
