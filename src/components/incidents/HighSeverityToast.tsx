@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { Incident } from "@/lib/types";
 
 const TOAST_DURATION_MS = 8_000;
@@ -35,6 +35,13 @@ function thumbUrl(sensorId: string, ts: string): string {
  */
 export function HighSeverityToast({ triggerIncident }: HighSeverityToastProps) {
   const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  // One auto-dismiss timer per banner, cleared only on unmount: a cleanup per
+  // trigger cancelled the previous banner's timer when the next alert came.
+  const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    const pending = timers.current;
+    return () => pending.forEach(clearTimeout);
+  }, []);
 
   const dismiss = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -55,14 +62,18 @@ export function HighSeverityToast({ triggerIncident }: HighSeverityToastProps) {
     });
 
     // Auto-dismiss after TOAST_DURATION_MS.
-    const timer = setTimeout(() => dismiss(id), TOAST_DURATION_MS);
-    return () => clearTimeout(timer);
+    const timer = setTimeout(() => {
+      timers.current.delete(timer);
+      dismiss(id);
+    }, TOAST_DURATION_MS);
+    timers.current.add(timer);
   }, [triggerIncident, dismiss]);
 
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    // bottom-14: above the Exit kiosk pill (Shell, bottom-4 right-4).
+    <div className="fixed bottom-14 right-4 z-50 flex flex-col gap-2">
       {toasts.map(({ id, incident }) => (
         <div
           key={id}
