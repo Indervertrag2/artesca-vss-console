@@ -78,6 +78,8 @@ async function warmClip(sensor: string, ts: string, end?: string): Promise<void>
   const win = clipWindow(ts, end);
   const playlistPath = cachePath(sensor, win.key, "index.m3u8");
   if (isCacheFresh(playlistPath, CLIP_CACHE_TTL_MS)) return;
+  // An unsettled span would cache a cut clip; the player fetches it later.
+  if (win.key !== ts && !win.settled) return;
 
   const tsRounded = roundTs(ts);
 

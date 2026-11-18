@@ -25,11 +25,11 @@ function windowOf(url: string): { start: string | null; end: string | null } {
 }
 
 describe("buildVstClipUrl", () => {
-  it("spans [ts - 2 s, end + 2 s] when the incident has an end", async () => {
+  it("spans [ts - 2 s, end + 20 s] when the incident has an end", async () => {
     const { buildVstClipUrl } = await import("@/lib/streams/vst-clip");
     expect(windowOf(buildVstClipUrl("s1", TS, END))).toEqual({
       start: "2026-01-01T11:59:58.000Z",
-      end: "2026-01-01T12:00:12.000Z",
+      end: "2026-01-01T12:00:30.000Z",
     });
   });
 
@@ -73,5 +73,28 @@ describe("serveClipPlaylist with an end", () => {
       `#EXTM3U\n#EXTINF:2.0,\nseg000.ts?end=${encodeURIComponent(END)}\n#EXT-X-ENDLIST\n`,
     );
     expect(await (await serveClipPlaylist("cam-a", TS)).text()).toBe("#EXTM3U\nold.ts\n");
+  });
+});
+
+describe("a span VST has not finalized", () => {
+  it("is settled only once its end is 60 s old", async () => {
+    const { clipWindow } = await import("@/lib/streams/vst-clip");
+    const stop = new Date("2026-01-01T12:00:30.000Z").getTime();
+    expect(clipWindow(TS, END, stop + 59_000).settled).toBe(false);
+    expect(clipWindow(TS, END, stop + 60_000).settled).toBe(true);
+  });
+
+  it("answers 425 with Retry-After and fetches nothing", async () => {
+    const { serveClipPlaylist } = await import("@/lib/streams/serve-clip");
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const ts = new Date(Date.now() - 15_000).toISOString();
+    const end = new Date(Date.now() - 5_000).toISOString();
+
+    const res = await serveClipPlaylist("cam-a", ts, end);
+    expect(res.status).toBe(425);
+    // Window end = end + 20 s, settled 60 s after that: about 75 s from now.
+    expect(Number(res.headers.get("Retry-After"))).toBeGreaterThan(70);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
   });
 });
