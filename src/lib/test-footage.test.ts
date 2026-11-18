@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   FootageError,
   footageCameraId,
@@ -87,5 +90,30 @@ describe("footageRtspUrl", () => {
   it("produces a URL that parses", () => {
     const u = new URL(footageRtspUrl("a-b-1.ts", "loop").replace("rtsp://", "http://"));
     expect(u.pathname).toBe("/loop/a-b-1.ts");
+  });
+});
+
+describe("listFootage and interrupted uploads", () => {
+  it("does not list .part files, and removes those no upload has written to for an hour", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "footage-"));
+    try {
+      writeFileSync(join(dir, "clip.mp4"), "x");
+      writeFileSync(join(dir, "uploading.mp4.part"), "x");
+      writeFileSync(join(dir, "abandoned.mp4.part"), "x");
+      const twoHoursAgo = new Date(Date.now() - 2 * 3_600_000);
+      utimesSync(join(dir, "abandoned.mp4.part"), twoHoursAgo, twoHoursAgo);
+
+      vi.resetModules();
+      vi.stubEnv("TEST_FOOTAGE_DIR", dir);
+      const { listFootage } = await import("./test-footage");
+      const files = await listFootage();
+
+      expect(files.map((f) => f.name)).toEqual(["clip.mp4"]);
+      expect(existsSync(join(dir, "abandoned.mp4.part"))).toBe(false);
+      expect(existsSync(join(dir, "uploading.mp4.part"))).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

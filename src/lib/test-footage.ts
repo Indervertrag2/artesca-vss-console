@@ -133,8 +133,16 @@ export async function listFootage(): Promise<FootageFile[]> {
   for (const name of entries) {
     if (name.startsWith(".")) continue;
     try {
-      const st = await stat(join(FOOTAGE_DIR, name));
+      const path = join(FOOTAGE_DIR, name);
+      const st = await stat(path);
       if (!st.isFile()) continue;
+      // An upload in progress (saveFootage). One whose process died stays
+      // behind, unplayable and undeletable through the API, so it goes once
+      // nothing has written to it for an hour.
+      if (name.endsWith(".part")) {
+        if (Date.now() - st.mtimeMs > 3_600_000) await unlink(path).catch(() => {});
+        continue;
+      }
       files.push({
         name,
         cameraId: footageCameraId(name),
