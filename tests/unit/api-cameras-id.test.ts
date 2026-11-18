@@ -205,6 +205,30 @@ describe("PATCH /api/cameras/[id] (k8s)", () => {
     expect(camsimAddCamera).toHaveBeenCalled();
     expect(upsertCamera).toHaveBeenCalledWith("inst-1", expect.objectContaining({ id: "cam01", description: "Updated entrance" }), expect.any(String));
   });
+
+  it("keeps the stored promptId and a real camera's RTSP URL with a camera-sim host set", async () => {
+    process.env.CAMERA_SIM_HOST = "sim.test";
+    try {
+      const upsertCamera = vi.fn().mockResolvedValue(undefined);
+      const stored = { id: "cam01", rtspUrl: "rtsp://camera.test/stream1", promptId: "night-shift", scenarioIds: ["fall"] };
+      vi.mocked(makeReconcileContext).mockResolvedValue({
+        instance: "inst-1", adapter: {} as never, refs: {} as never,
+        store: { upsertCamera, readCameras: vi.fn().mockResolvedValue([stored]) } as never,
+      } as never);
+      vi.mocked(camsimListCameras).mockResolvedValue([]); // not a camera-sim stream
+
+      const res = await PATCH(makeRequest("PATCH", { description: "Updated entrance" }), makeParams("cam01"));
+
+      expect(res.status).toBe(200);
+      expect(upsertCamera).toHaveBeenCalledWith(
+        "inst-1",
+        { ...stored, description: "Updated entrance" },
+        expect.any(String),
+      );
+    } finally {
+      delete process.env.CAMERA_SIM_HOST;
+    }
+  });
 });
 
 // ── PUT ─────────────────────────────────────────────────────────────
