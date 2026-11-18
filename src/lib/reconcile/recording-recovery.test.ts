@@ -527,6 +527,84 @@ describe("escalation", () => {
     expect(again.escalated).toBe(true);
     expect(restart).toHaveBeenCalledTimes(2);
   });
+
+  it("cooldown and cap survive passes of unknown probes and an empty sensor list", async () => {
+    const { rearm, restart } = mkFns();
+    const cfg: RecoveryConfig = { ...CONFIG, escalateMaxRestarts: 2, escalateCooldownMs: 1000 };
+    const names = ["cam-1", "cam-2"];
+    const sensors = names.map((n) => mkSensor(n));
+    const desired = names.map((n) => mkCamera(n));
+    await primeEverRecordedThenStall(names, { rearm, restart }, cfg);
+    const pass = (probe: RecordingStatus, t: number, listed = sensors) =>
+      recoverStalledRecording({
+        sensors: listed,
+        desired,
+        probe: allProbe(names, probe),
+        rearm,
+        restartStreamProcessing: restart,
+        now: () => t,
+        config: cfg,
+      });
+
+    expect((await pass("not-recording", 200)).escalated).toBe(true);
+    // The restarted pod does not answer yet: unknown probes, then no sensors listed.
+    await pass("unknown", 300);
+    await pass("unknown", 400, []);
+    // Back up, still stalled — within the cooldown of the first restart.
+    expect((await pass("not-recording", 500)).escalated).toBe(false);
+    expect(restart).toHaveBeenCalledTimes(1);
+
+    expect((await pass("not-recording", 1300)).escalated).toBe(true);
+    await pass("unknown", 1400);
+    await pass("unknown", 1500, []);
+    // Past the cooldown again, but escalateMaxRestarts (2) is reached.
+    expect((await pass("not-recording", 2500)).escalated).toBe(false);
+    expect((await pass("not-recording", 4000)).escalated).toBe(false);
+    expect(restart).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not reset the counters while a sensor stalled at the restart has not recorded again", async () => {
+    const { rearm, restart } = mkFns();
+    const names = ["cam-1", "cam-2"]; // escalateMaxRestarts: 1
+    const sensors = names.map((n) => mkSensor(n));
+    const desired = names.map((n) => mkCamera(n));
+    await primeEverRecordedThenStall(names, { rearm, restart }, CONFIG);
+    const pass = (probe: (id: string) => Promise<RecordingStatus>, t: number) =>
+      recoverStalledRecording({ sensors, desired, probe, rearm, restartStreamProcessing: restart, now: () => t, config: CONFIG });
+
+    expect((await pass(allProbe(names, "not-recording"), 200)).escalated).toBe(true);
+    // Only cam-1 records again; cam-2 does not answer.
+    await pass(statusMap({ "cam-1": "recording", "cam-2": "unknown" }), 300);
+    await pass(statusMap({ "cam-1": "not-recording", "cam-2": "not-recording" }), 400);
+    expect((await pass(allProbe(names, "not-recording"), 2000)).escalated).toBe(false);
+    expect(restart).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the restarted pod a full stall threshold before its sensors count again", async () => {
+    const { rearm, restart } = mkFns();
+    // Cooldown shorter than the stall threshold, so only the grace can hold it.
+    const cfg: RecoveryConfig = { ...CONFIG, escalateMaxRestarts: 5, escalateCooldownMs: 50 };
+    const names = ["cam-1", "cam-2"];
+    const sensors = names.map((n) => mkSensor(n));
+    const desired = names.map((n) => mkCamera(n));
+    await primeEverRecordedThenStall(names, { rearm, restart }, cfg);
+    const pass = (t: number) =>
+      recoverStalledRecording({
+        sensors,
+        desired,
+        probe: allProbe(names, "not-recording"),
+        rearm,
+        restartStreamProcessing: restart,
+        now: () => t,
+        config: cfg,
+      });
+
+    expect((await pass(200)).escalated).toBe(true);
+    // 60 ms after the restart: past the cooldown, short of the 100 ms threshold.
+    expect((await pass(260)).escalated).toBe(false);
+    expect((await pass(320)).escalated).toBe(true);
+    expect(restart).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("recoverStalledRecording — offline sensors whose source answers", () => {

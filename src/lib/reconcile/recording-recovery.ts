@@ -108,10 +108,17 @@ const everRecorded = new Set<string>();
 
 /**
  * Module-level escalation bookkeeping for the pod-restart escalation: when the
- * last streamprocessing restart fired, and how many have fired so far (capped
- * by `escalateMaxRestarts`, gated by `escalateCooldownMs`).
+ * last streamprocessing restart fired, how many have fired so far (capped by
+ * `escalateMaxRestarts`, gated by `escalateCooldownMs`), and which sensors were
+ * stalled when it fired. The bookkeeping resets only once all of those probe
+ * "recording" again: while the restarted pod is coming up its probes read
+ * `unknown` or VST lists no sensors, and a reset there re-armed the next
+ * restart as soon as the pod answered.
  */
-const escalationState: { lastEscalationAt?: number; restarts: number } = { restarts: 0 };
+const escalationState: { lastEscalationAt?: number; restarts: number; stalled: string[] } = {
+  restarts: 0,
+  stalled: [],
+};
 
 export interface RecoverStalledRecordingDeps {
   /**
@@ -188,6 +195,7 @@ export async function recoverStalledRecording(
   const reArmed: string[] = [];
   const degraded: string[] = [];
   const stalledRecoverable: string[] = [];
+  const recording = new Set<string>();
   let rearmsThisCycle = 0;
 
   for (const sensor of [...online, ...offlineReachable]) {
@@ -208,6 +216,7 @@ export async function recoverStalledRecording(
 
     if (status === "recording") {
       everRecorded.add(name);
+      recording.add(name);
       state.delete(name);
       outcomes.push({ name, probe: status, outcome: "healthy", attempts: 0 });
       continue;
@@ -231,7 +240,10 @@ export async function recoverStalledRecording(
     // Escalation-eligible = past the stall threshold AND known to have recorded
     // before. Captured regardless of the per-sensor outcome below (degraded,
     // waiting, or rearmed) so the pod-global count reflects the true stall size.
-    if (pastThreshold && everRecorded.has(name)) {
+    // The stall counts from the last restart at the earliest: the restarted pod
+    // gets a full threshold to bring its recorders back before it is judged.
+    const stalledSince = Math.max(st.notRecordingSince, escalationState.lastEscalationAt ?? -Infinity);
+    if (nowMs - stalledSince > cfg.stallThresholdMs && everRecorded.has(name)) {
       stalledRecoverable.push(name);
     }
 
@@ -302,14 +314,18 @@ export async function recoverStalledRecording(
         escalated = true;
         escalationState.lastEscalationAt = nowMsEnd;
         escalationState.restarts += 1;
+        escalationState.stalled = stalledRecoverable;
       } catch (err) {
         deps.log?.warn("recording-recovery: streamprocessing restart threw", { err });
       }
     }
   }
-  if (stalledRecoverable.length === 0) {
+  // A camera removed while stalled holds the counters until the console
+  // restarts; that only ever means fewer restarts.
+  if (stalledRecoverable.length === 0 && escalationState.stalled.every((n) => recording.has(n))) {
     escalationState.lastEscalationAt = undefined;
     escalationState.restarts = 0;
+    escalationState.stalled = [];
   }
 
   return { outcomes, reArmed, degraded, escalated };
@@ -339,4 +355,5 @@ export function _resetRecoveryStateForTests(): void {
   everRecorded.clear();
   escalationState.lastEscalationAt = undefined;
   escalationState.restarts = 0;
+  escalationState.stalled = [];
 }
