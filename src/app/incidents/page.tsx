@@ -115,7 +115,10 @@ function IncidentsPageContent() {
   // that context, NOT the query param, which is gone before this renders.
   const { kiosk: isKiosk } = useKiosk();
 
-  const [incidents, setIncidents] = useState<Incident[]>([]);
+  // Incidents that arrived after the backlog load (SSE + polling fallback).
+  // The backlog itself is the query's data, so a remount that reuses the cached
+  // query still shows it.
+  const [liveIncidents, setLiveIncidents] = useState<Incident[]>([]);
   const [filters, setFilters] = useState<FilterState>(DEFAULT_FILTERS);
   const [selected, setSelected] = useState<Incident | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("timeline");
@@ -166,7 +169,7 @@ function IncidentsPageContent() {
 
   /** Merge a new incident into state: prepend, deduplicate by ts+sensorId. */
   const mergeIncident = useCallback((inc: Incident) => {
-    setIncidents((prev) => {
+    setLiveIncidents((prev) => {
       const key = `${inc.ts}::${inc.sensorId}`;
       if (prev.some((i) => `${i.ts}::${i.sensorId}` === key)) return prev;
       return [inc, ...prev];
@@ -203,19 +206,27 @@ function IncidentsPageContent() {
   }, []);
 
   // Initial fetch (SSR-style client fetch on mount)
-  useQuery<Incident[]>({
+  const backlog = useQuery<Incident[]>({
     queryKey: ["incidents-initial"],
     queryFn: async () => {
       const res = await fetch("/api/incidents?limit=50");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: unknown = await res.json();
-      const parsed = parseIncidentsResponse(data);
-      setIncidents(parsed);
-      return parsed;
+      return parseIncidentsResponse(data);
     },
     staleTime: Infinity, // SSE handles updates after initial load
     refetchOnWindowFocus: false,
+    // A failed load retries on its own: the kiosk wall has no Retry button.
+    refetchInterval: (query) => (query.state.status === "error" ? 10_000 : false),
   });
+
+  const incidents = useMemo(() => {
+    const live = new Set(liveIncidents.map((i) => `${i.ts}::${i.sensorId}`));
+    return [
+      ...liveIncidents,
+      ...(backlog.data ?? []).filter((i) => !live.has(`${i.ts}::${i.sensorId}`)),
+    ];
+  }, [liveIncidents, backlog.data]);
 
   // Available scenarios for filter chips
   const { data: scenarios = [] } = useQuery<Pick<Scenario, "id" | "name">[]>({
@@ -242,8 +253,8 @@ function IncidentsPageContent() {
       const data: unknown = await res.json();
       const parsed = parseIncidentsResponse(data);
       // Merge each polled incident so we don't drop items received via SSE
-      // before the fallback kicked in. setIncidents full-replace would lose
-      // SSE-received items that aren't yet in the server window.
+      // before the fallback kicked in. A full replace would lose SSE-received
+      // items that aren't yet in the server window.
       parsed.forEach(mergeIncident);
       return parsed;
     },
@@ -352,6 +363,19 @@ function IncidentsPageContent() {
               Live stream interrupted — reconnecting
               {sseFailed ? " (polling for updates)" : "…"}
             </span>
+          </div>
+        )}
+
+        {backlog.isError && (
+          <div className="flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <span>Could not load the incident backlog: {backlog.error.message}</span>
+            <button
+              type="button"
+              onClick={() => void backlog.refetch()}
+              className="ml-auto rounded border border-red-300 px-2 py-0.5 font-medium hover:bg-red-100"
+            >
+              Retry
+            </button>
           </div>
         )}
 
