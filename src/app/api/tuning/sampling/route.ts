@@ -7,7 +7,8 @@
 // GET  reads the desired sampling from the ConfigMap's rules.json top-level.
 // PATCH writes the new sampling into rules.json, then deletes the live rules so
 //       the reconciler re-seeds them from the updated ConfigMap (~15s). Single
-//       writer (the reconciler), so no duplicate rules.
+//       writer (the reconciler), so no duplicate rules. Without a reconciler
+//       deployed, the route re-POSTs each rule it deleted itself.
 
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
@@ -16,6 +17,7 @@ import { CLUSTER } from "@/lib/cluster-refs";
 import { readConfigMapKey, patchConfigMapRawKey } from "@/lib/helpers/configmaps";
 import { deleteRealtimeRule } from "@/lib/helpers/alert-bridge";
 import { auditLog } from "@/lib/helpers/audit";
+import { deploymentExists } from "@/lib/k8s";
 import { withRequestContext } from "@/lib/with-request-context";
 import { rejectIfKiosk } from "@/lib/kiosk-server";
 import { extractK8sError } from "@/lib/errors";
@@ -120,11 +122,14 @@ export const PATCH = withRequestContext(async function (req: NextRequest) {
 
   // ── Step 2: re-register each live rule with the new sampling ───────────────
   // The alert-bridge has no PATCH on a rule, so applying a sampling change means
-  // delete + re-POST. We re-register from the LIVE rules (which carry the stream
-  // URL + full config) one at a time — never bulk-draining — so a rule is only
-  // briefly absent and the set is never emptied. The reconciler is not relied on
-  // (its seed path can't restore rules: the ConfigMap carries no per-rule URL).
+  // delete + re-POST. Where the reconciler is deployed it re-seeds the deleted
+  // rules from the ConfigMap and the route must not POST: two writers each see
+  // no rule for a sensor and each post one (see restoreCameras in
+  // test-footage-run.ts). Otherwise we re-register from the LIVE rules (which
+  // carry the stream URL + full config), each POST after its own delete, so a
+  // rule is only briefly absent and the set is never emptied.
   const warnings: string[] = [];
+  const reconciler = await deploymentExists(ns, CLUSTER.alertBridge.reconcilerDeployment);
   let live: Array<Record<string, unknown>> = [];
   try {
     const resp = await fetch(CLUSTER.alertBridge.realtimeUrl, {
@@ -154,7 +159,7 @@ export const PATCH = withRequestContext(async function (req: NextRequest) {
   // client-timing-out on a slow alert-bridge. Rules are independent (per sensor).
   const outcomes = await Promise.all(
     live.map(async (r): Promise<{ ok: boolean; warning?: string }> => {
-      if (!r.live_stream_url || !r.alert_type) return { ok: false };
+      if (!reconciler && (!r.live_stream_url || !r.alert_type)) return { ok: false };
       const id = typeof r.id === "string" ? r.id : undefined;
       const body: Record<string, unknown> = {};
       for (const k of PRESERVE) if (r[k] !== undefined && r[k] !== null) body[k] = r[k];
@@ -162,7 +167,12 @@ export const PATCH = withRequestContext(async function (req: NextRequest) {
       body.num_frames_per_second_or_fixed_frames_chunk = framesPerChunk;
       body.use_fps_for_chunking = useFps;
 
-      if (id) await deleteRealtimeRule(id);
+      // A POST after a failed delete leaves the camera with two rules.
+      if (id) {
+        const del = await deleteRealtimeRule(id);
+        if (!del.ok) return { ok: false, warning: `delete ${String(r.sensor_name)} rule: ${del.warning ?? "failed"}` };
+      }
+      if (reconciler) return { ok: true };
       try {
         const post = await fetch(CLUSTER.alertBridge.realtimeUrl, {
           method: "POST",
@@ -197,7 +207,9 @@ export const PATCH = withRequestContext(async function (req: NextRequest) {
     ok: true,
     applied: { framesPerChunk, useFps, chunkDuration },
     rulesReRegistered: reRegistered,
-    note: "Sampling persisted to the rules ConfigMap and applied by re-registering each live rule. No VLM restart.",
+    note: reconciler
+      ? "Sampling persisted to the rules ConfigMap; the live rules were deleted and the reconciler re-seeds them. No VLM restart."
+      : "Sampling persisted to the rules ConfigMap and applied by re-registering each live rule. No VLM restart.",
     ...(warnings.length ? { warnings } : {}),
   });
 });

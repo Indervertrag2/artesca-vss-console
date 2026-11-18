@@ -39,7 +39,7 @@
     "mutatingCount": 34,
     "guardedCount": 18,
     "backendCounts": {
-      "k8s": 32,
+      "k8s": 33,
       "ssh": 2,
       "s3": 15,
       "kafka": 6,

@@ -23,7 +23,7 @@ import {
 const log = createLogger("test-footage-run");
 
 /** The watcher that re-seeds alert rules from the ConfigMap. */
-const RECONCILER_DEPLOYMENT = process.env.VLM_RECONCILER_DEPLOYMENT ?? "vlm-stream-reconciler";
+const RECONCILER_DEPLOYMENT = CLUSTER.alertBridge.reconcilerDeployment;
 
 /**
  * Record (or clear) the sensors a run has paused, in the same rules ConfigMap
