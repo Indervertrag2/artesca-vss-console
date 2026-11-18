@@ -795,6 +795,9 @@ export const CLUSTER = {
      *  vlm-stream-reconciler converges from. Sampling tuning is written here. */
     rulesConfigMap: process.env.REALTIME_RULES_CM ?? "realtime-alert-rules",
     rulesNamespace: VSS_NS,
+    /** The watcher (in rulesNamespace) that seeds the live rules from that
+     *  ConfigMap. Where it is deployed it is the only writer of live rules. */
+    reconcilerDeployment: process.env.VLM_RECONCILER_DEPLOYMENT ?? "vlm-stream-reconciler",
     /** RT-VLM /v1/models — the authority on which model id a rule may carry. */
     vlmModelsUrl: RTVI_VLM_MODELS_URL,
   },

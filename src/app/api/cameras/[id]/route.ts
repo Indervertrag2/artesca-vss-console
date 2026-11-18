@@ -5,7 +5,7 @@ import { createLogger } from "@/lib/logger";
 import { withRequestContext } from "@/lib/with-request-context";
 
 const log = createLogger("api/cameras/[id]");
-import { vstDeleteSensor, setRecording } from "@/lib/helpers/vst";
+import { vstDeleteSensor, vstListSensors, setRecording } from "@/lib/helpers/vst";
 import { setIngestion } from "@/lib/helpers/ingestion";
 import { auditLog } from "@/lib/helpers/audit";
 import {
@@ -318,16 +318,19 @@ export const PATCH = withRequestContext(async function (
   // k8s path: upsert the updated entry to Firestore + apply to cluster.
   const { makeReconcileContext, ReconcileContextError } = await import("@/lib/reconcile/context");
   const { reconcileCameras } = await import("@/lib/reconcile/cameras");
-  const rtspBase = process.env.CAMERA_SIM_HOST ? `rtsp://${process.env.CAMERA_SIM_HOST}:8554/${id}` : "";
-  const entry = { id, rtspUrl: rtspBase, ...(update.role ? { role: update.role } : {}), ...(newDescription ? { description: newDescription } : {}) };
+  // The camera-sim URL only for a stream camera-sim serves; a real camera keeps its own.
+  const simUrl = simEntry && process.env.CAMERA_SIM_HOST ? `rtsp://${process.env.CAMERA_SIM_HOST}:8554/${id}` : "";
   try {
     const ctx = await makeReconcileContext();
     const existing = (await ctx.store.readCameras(ctx.instance)).find((c) => c.id === id);
+    // Start from the stored entry: upsert replaces the whole entity, so a field
+    // not carried over (promptId, …) would be dropped.
     const merged = {
-      ...entry,
-      ...(existing?.scenarioIds ? { scenarioIds: existing.scenarioIds } : {}),
-      ...(existing?.recording ? { recording: existing.recording } : {}),
-      ...(existing?.rtspUrl && !rtspBase ? { rtspUrl: existing.rtspUrl } : {}),
+      ...existing,
+      id,
+      rtspUrl: simUrl || existing?.rtspUrl || "",
+      ...(update.role ? { role: update.role } : {}),
+      ...(newDescription ? { description: newDescription } : {}),
     };
     await ctx.store.upsertCamera(ctx.instance, merged, session.user?.email ?? "console");
     const result = await reconcileCameras([merged], ctx.adapter, { prune: false });
@@ -377,9 +380,20 @@ export const DELETE = withRequestContext(async function (
     );
   }
 
-  // 2. Unregister from VST (best-effort — a stale VST sensor is harmless).
-  const vstDel = await vstDeleteSensor(id);
-  if (!vstDel.ok && vstDel.warning) warnings.push(vstDel.warning);
+  // 2. Stop the camera's realtime rule (live rule + ConfigMap entry), then
+  //    unregister its VST sensor by UUID: VST keys deletes on the UUID, and a
+  //    delete by name fails and leaves the sensor recording. A failed
+  //    unregister fails the request, after the steps below have run.
+  const ing = await setIngestion(id, false);
+  if (!ing.ok && ing.warning) warnings.push(`ingestion teardown: ${ing.warning}`);
+  const vstFailures: string[] = [];
+  const live = await vstListSensors();
+  if (live.warning) vstFailures.push(live.warning);
+  for (const s of live.sensors) {
+    if (s.sensor_id !== id || s.status === "removed") continue;
+    const del = await vstDeleteSensor(String(s.streamId ?? "") || id);
+    if (!del.ok) vstFailures.push(del.warning ?? "VST delete failed");
+  }
 
   // 3. Delete the .ts file via control-plane (best-effort — leaving it is
   //    harmless, just consumes disk).
@@ -411,5 +425,11 @@ export const DELETE = withRequestContext(async function (
     source: sourceFile,
   });
 
+  if (vstFailures.length) {
+    return NextResponse.json(
+      { ok: false, error: `VST unregister failed for '${id}': ${vstFailures.join("; ")}`, cameraId: id, warnings },
+      { status: 502 },
+    );
+  }
   return NextResponse.json({ ok: true, cameraId: id, warnings });
 });

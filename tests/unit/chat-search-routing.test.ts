@@ -28,8 +28,8 @@ describe("detectSearchIntent", () => {
   });
 
   it("matches 'show me all clips of …'", () => {
-    expect(detectSearchIntent("show me all people running")?.query).toBe(
-      "show me all people running",
+    expect(detectSearchIntent("show me all clips of people running")?.query).toBe(
+      "show me all clips of people running",
     );
   });
 
@@ -45,6 +45,11 @@ describe("detectSearchIntent", () => {
     expect(detectSearchIntent("how many cameras are streaming?")).toBeNull();
     expect(detectSearchIntent("what happened on dock-1 recently?")).toBeNull();
     expect(detectSearchIntent("give me a summary of the last hour")).toBeNull();
+  });
+
+  it("does NOT hijack a quantified question about cameras", () => {
+    expect(detectSearchIntent("show me all cameras")).toBeNull();
+    expect(detectSearchIntent("find any camera that is offline")).toBeNull();
   });
 
   it("parses the (sensor: X) scope suffix out of the query", () => {

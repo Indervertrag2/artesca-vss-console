@@ -16,7 +16,12 @@ vi.mock("@/app/api/cameras/route", () => ({
 
 vi.mock("@/lib/helpers/vst", () => ({
   vstDeleteSensor: vi.fn().mockResolvedValue({ ok: true }),
+  vstListSensors: vi.fn().mockResolvedValue({ sensors: [] }),
   setRecording: vi.fn().mockResolvedValue({ ok: true }),
+}));
+
+vi.mock("@/lib/helpers/ingestion", () => ({
+  setIngestion: vi.fn().mockResolvedValue({ ok: true }),
 }));
 
 vi.mock("@/lib/helpers/camsim-control", () => ({
@@ -76,7 +81,8 @@ import {
   camsimDeleteFile,
   CamsimControlError,
 } from "@/lib/helpers/camsim-control";
-import { vstDeleteSensor, setRecording } from "@/lib/helpers/vst";
+import { vstDeleteSensor, vstListSensors, setRecording } from "@/lib/helpers/vst";
+import { setIngestion } from "@/lib/helpers/ingestion";
 import { getCameraOverride, upsertCameraOverride, deleteCameraOverride } from "@/lib/db";
 import { gcsCamerasGet } from "@/lib/helpers/gcs-config";
 import { auditLog } from "@/lib/helpers/audit";
@@ -128,6 +134,14 @@ beforeEach(() => {
   });
   vi.mocked(camsimDeleteFile).mockReset().mockResolvedValue(undefined);
   vi.mocked(vstDeleteSensor).mockReset().mockResolvedValue({ ok: true });
+  vi.mocked(vstListSensors).mockReset().mockResolvedValue({
+    sensors: [
+      { sensor_id: "cam01", name: "cam01", status: "removed", streamId: "uuid-old" },
+      { sensor_id: "cam01", name: "cam01", status: "online", streamId: "uuid-cam01" },
+      { sensor_id: "cam02", name: "cam02", status: "online", streamId: "uuid-cam02" },
+    ],
+  });
+  vi.mocked(setIngestion).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(setRecording).mockReset().mockResolvedValue({ ok: true });
   vi.mocked(gcsCamerasGet).mockReset().mockResolvedValue(null);
   vi.mocked(getCameraOverride).mockReset().mockReturnValue(null);
@@ -191,6 +205,30 @@ describe("PATCH /api/cameras/[id] (k8s)", () => {
     expect(camsimAddCamera).toHaveBeenCalled();
     expect(upsertCamera).toHaveBeenCalledWith("inst-1", expect.objectContaining({ id: "cam01", description: "Updated entrance" }), expect.any(String));
   });
+
+  it("keeps the stored promptId and a real camera's RTSP URL with a camera-sim host set", async () => {
+    process.env.CAMERA_SIM_HOST = "sim.test";
+    try {
+      const upsertCamera = vi.fn().mockResolvedValue(undefined);
+      const stored = { id: "cam01", rtspUrl: "rtsp://camera.test/stream1", promptId: "night-shift", scenarioIds: ["fall"] };
+      vi.mocked(makeReconcileContext).mockResolvedValue({
+        instance: "inst-1", adapter: {} as never, refs: {} as never,
+        store: { upsertCamera, readCameras: vi.fn().mockResolvedValue([stored]) } as never,
+      } as never);
+      vi.mocked(camsimListCameras).mockResolvedValue([]); // not a camera-sim stream
+
+      const res = await PATCH(makeRequest("PATCH", { description: "Updated entrance" }), makeParams("cam01"));
+
+      expect(res.status).toBe(200);
+      expect(upsertCamera).toHaveBeenCalledWith(
+        "inst-1",
+        { ...stored, description: "Updated entrance" },
+        expect.any(String),
+      );
+    } finally {
+      delete process.env.CAMERA_SIM_HOST;
+    }
+  });
 });
 
 // ── PUT ─────────────────────────────────────────────────────────────
@@ -245,7 +283,31 @@ describe("DELETE /api/cameras/[id] (k8s)", () => {
     const res = await DELETE(req, makeParams("cam01"));
     expect(res.status).toBe(200);
     expect(deleteCamera).toHaveBeenCalledWith("inst-1", "cam01", expect.any(String));
-    expect(vstDeleteSensor).toHaveBeenCalledWith("cam01");
     expect(writeToGcs).not.toHaveBeenCalled();
+  });
+
+  it("stops the camera's realtime rule, then deletes its live VST sensor by UUID", async () => {
+    vi.mocked(makeReconcileContext).mockResolvedValue({
+      instance: "inst-1", adapter: {} as never, refs: {} as never, store: { deleteCamera: vi.fn() } as never,
+    } as never);
+    const res = await DELETE(makeRequest("DELETE"), makeParams("cam01"));
+    expect(res.status).toBe(200);
+    expect(setIngestion).toHaveBeenCalledWith("cam01", false);
+    expect(vi.mocked(setIngestion).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(vstDeleteSensor).mock.invocationCallOrder[0],
+    );
+    expect(vi.mocked(vstDeleteSensor).mock.calls).toEqual([["uuid-cam01"]]);
+  });
+
+  it("reports a failed VST delete as a failure", async () => {
+    vi.mocked(makeReconcileContext).mockResolvedValue({
+      instance: "inst-1", adapter: {} as never, refs: {} as never, store: { deleteCamera: vi.fn() } as never,
+    } as never);
+    vi.mocked(vstDeleteSensor).mockResolvedValue({ ok: false, warning: "VST delete returned HTTP 500" });
+    const res = await DELETE(makeRequest("DELETE"), makeParams("cam01"));
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.ok).toBe(false);
+    expect(body.error).toContain("HTTP 500");
   });
 });

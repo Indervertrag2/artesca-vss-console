@@ -54,7 +54,12 @@ export async function reconcileCameras(
     drift: [],
   };
 
-  const live = await adapter.listSensors();
+  // A `removed` sensor is VST's tombstone for one already deleted, not a sensor.
+  // VST keeps them in /sensor/list forever. Matched as a desired camera, one
+  // made it read as present, so a camera whose sensor was deleted (a failed
+  // re-arm, a parked camera re-enabled, a camera added again) was never
+  // re-added; and when a name had both, the map kept whichever came last.
+  const live = (await adapter.listSensors()).filter((s) => s.status !== "removed");
   const liveByName = new Map(live.map((s) => [s.name, s]));
   const desiredIds = new Set(desired.map((c) => c.id));
 
@@ -89,8 +94,7 @@ export async function reconcileCameras(
   // Handle extras (live sensors not in desired).
   for (const s of live) {
     if (desiredIds.has(s.name)) continue;
-    // A `removed` sensor is VST's tombstone for one already deleted, not a sensor.
-    // VST keeps them in /sensor/list forever, so without this every camera ever
+    // Tombstones are filtered out above. Otherwise every camera ever
     // deleted is reported as an extra live sensor on every pass — and the report is
     // the thing this drift list exists to make readable. Measured on
     // pyramid-showroom 2026-08-14: 21 entries in /sensor/list, 5 online cameras
@@ -100,7 +104,6 @@ export async function reconcileCameras(
     //
     // It also stops prune acting on them: with `opts.prune` on, the branch below
     // would call removeSensor once per tombstone, per pass, forever.
-    if (s.status === "removed") continue;
     result.drift.push(`extra live sensor not in desired: ${s.name}`);
     if (opts.prune && adapter.removeSensor) {
       const res = await adapter.removeSensor(s.uuid ?? s.sensorId);

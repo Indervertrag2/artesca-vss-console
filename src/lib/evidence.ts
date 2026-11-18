@@ -208,8 +208,15 @@ function isAccessDenied(e: unknown): boolean {
  *  - the delete throws for any other reason (network, creds, wrong bucket,
  *    NoSuchKey/NoSuchVersion, timeout, …) → "inconclusive" — we could NOT
  *    verify either way, and must never report that as a false "immutable".
+ *
+ * Without a versionId (its HeadObject failed) nothing is sent: in a versioned
+ * bucket a delete without one is not blocked by the lock — S3 adds a delete
+ * marker, which would read as "deleted" and hide the object from the list.
  */
 export async function verifyImmutable(key: string, versionId?: string): Promise<VerifyResult> {
+  if (!versionId) {
+    return { status: "inconclusive", error: "no version id for this object — reload the list and verify again" };
+  }
   try {
     await client().send(new DeleteObjectCommand({ Bucket: EVIDENCE_BUCKET, Key: key, VersionId: versionId }));
     return { status: "deleted" };

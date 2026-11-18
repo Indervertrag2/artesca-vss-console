@@ -9,8 +9,9 @@
 // Resolution order:
 //   1. Server-side cache (/data/clip-cache/<sensor>-<ts>/index.m3u8) — hit → serve.
 //   2. Alert-clips bucket manifest → fetch video bytes from manifest.vst_clip_url.
-//   3. VST clip endpoint (live) — exact ts, then a recent-window fallback for
-//      camera-clock skew (incident NTP outside VST's node-clock timeline).
+//   3. VST clip endpoint (live) — exact ts, then, for a fresh incident only, a
+//      recent-window fallback for camera-clock skew (incident NTP outside VST's
+//      node-clock timeline).
 // On a cache miss the MP4 is transcoded to HLS with ffmpeg and cached; the
 // sibling [segment] route then serves the .ts files from the same cache dir.
 
@@ -62,6 +63,9 @@ async function fetchManifestFromS3(
   }
 }
 
+/** How close to now an incident's ts must be for the recent-window fallback. */
+const RECENT_FALLBACK_MAX_AGE_MS = 120_000;
+
 /** Fetches raw MP4 bytes from a VST clip URL (s3-confirmed or vst-live).
  *  On failure, pushes a human-readable reason onto `diag` so the 404 the
  *  caller returns can explain *why* playback is unavailable. */
@@ -102,9 +106,12 @@ export async function serveClipPlaylist(
   const span = win.key !== ts;
   const playlistPath = cachePath(sensor, win.key, "index.m3u8");
   // The player resolves segment URIs against the playlist URL, which drops its
-  // query; carry `end` so the [segment] route reads the same cache entry.
-  const playlist = (): string => {
-    const content = fs.readFileSync(playlistPath, "utf8");
+  // query; carry `end` so the [segment] route reads the same cache entry. A
+  // recent-window fallback is cached under its own ts, never the incident's,
+  // so its segment URIs point at that ts.
+  const playlist = (key = win.key): string => {
+    const content = fs.readFileSync(cachePath(sensor, key, "index.m3u8"), "utf8");
+    if (key !== win.key) return content.replace(/^seg\d+\.ts$/gm, `../${encodeURIComponent(key)}/$&`);
     return span
       ? content.replace(/^seg\d+\.ts$/gm, `$&?end=${encodeURIComponent(end ?? "")}`)
       : content;
@@ -129,7 +136,9 @@ export async function serveClipPlaylist(
   // --- Cache miss — resolve source ---
   const tsRounded = roundTs(ts);
   let mp4Buffer: Buffer | null = null;
-  let source: "s3-confirmed" | "vst-live" = "vst-live";
+  let source: "s3-confirmed" | "vst-live" | "vst-recent" = "vst-live";
+  // Cache key the transcode lands under: the incident's, or the fallback's ts.
+  let key = win.key;
   // Diagnostics accumulated across resolution branches, surfaced in the 404
   // body so the operator learns *why* a clip is missing (no recording, clock
   // skew, sensor name not in VST, …) instead of a bare "not found".
@@ -162,10 +171,16 @@ export async function serveClipPlaylist(
       // VST's recorded timeline and 404s. Incidents stream in near-real-time,
       // so the footage was recorded ~now on the node clock — fall back to the
       // most recent recorded window so the camera's clip still plays. No-op for
-      // clock-synced cameras (the exact fetch succeeds).
-      if (!mp4Buffer) {
+      // clock-synced cameras (the exact fetch succeeds). Only for a fresh
+      // incident: for an older one the recent window is unrelated footage, and
+      // its missing window (retention, a gap) is a 404 with diagnostics.
+      if (!mp4Buffer && Math.abs(Date.now() - new Date(ts).getTime()) <= RECENT_FALLBACK_MAX_AGE_MS) {
         const recentTs = new Date(Date.now() - 30_000).toISOString();
         mp4Buffer = await fetchMp4FromUrl(buildVstClipUrl(streamId, recentTs), diag);
+        if (mp4Buffer) {
+          source = "vst-recent";
+          key = recentTs;
+        }
       }
     } else {
       diag.push(
@@ -193,12 +208,12 @@ export async function serveClipPlaylist(
   const tmpMp4 = path.join(tmpDir, "clip.mp4");
   fs.writeFileSync(tmpMp4, mp4Buffer);
 
-  const outDir = ensureCacheDir(sensor, win.key);
+  const outDir = ensureCacheDir(sensor, key);
 
   try {
     await transcodeToHls(tmpMp4, outDir);
-    const thumbPath = cachePath(sensor, win.key, "thumb.jpg");
-    await extractThumbnail(tmpMp4, thumbPath, win.thumbSecs);
+    const thumbPath = cachePath(sensor, key, "thumb.jpg");
+    await extractThumbnail(tmpMp4, thumbPath, key === win.key ? win.thumbSecs : 0);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -206,14 +221,14 @@ export async function serveClipPlaylist(
   // LRU eviction in background (don't block response).
   setImmediate(evictLru);
 
-  if (!fs.existsSync(playlistPath)) {
+  if (!fs.existsSync(cachePath(sensor, key, "index.m3u8"))) {
     return NextResponse.json(
       { error: "Transcoding produced no output" },
       { status: 500 }
     );
   }
 
-  return new NextResponse(playlist(), {
+  return new NextResponse(playlist(key), {
     status: 200,
     headers: {
       "Content-Type": "application/vnd.apple.mpegurl",

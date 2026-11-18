@@ -293,6 +293,7 @@ export async function generateIncidentReport(
   // 4. Resolve the live LLM wiring and generate, falling back to a
   //    deterministic report on any failure.
   let bodyMarkdown: string;
+  let degraded = false;
   try {
     const behavior = await collectAgentBehavior();
     if (!behavior.llm?.baseUrl) {
@@ -310,22 +311,27 @@ export async function generateIncidentReport(
     const msg = err instanceof Error ? err.message : String(err);
     warnings.push(`LLM synthesis unavailable, used a deterministic fallback report: ${msg}`);
     bodyMarkdown = buildFallbackMarkdown(sensorId, ts, info);
+    degraded = true;
   }
 
   // 5. Append the deterministic Evidence section (real, always-correct URLs —
   //    never left to the LLM to guess at).
   const markdown = `${bodyMarkdown}\n\n${buildEvidenceSection(frames, clipUrl)}`;
 
-  // 6. Persist + return.
+  // 6. Persist + return. A fallback report is not persisted: a cache hit
+  //    carries no warning, so it would read as a normal report, and the next
+  //    open should retry the LLM.
   try {
-    saveIncidentReport({
-      sensorId,
-      ts,
-      markdown,
-      frames,
-      clipUrl,
-      generatedAt: new Date().toISOString(),
-    });
+    if (!degraded) {
+      saveIncidentReport({
+        sensorId,
+        ts,
+        markdown,
+        frames,
+        clipUrl,
+        generatedAt: new Date().toISOString(),
+      });
+    }
   } catch (err) {
     warnings.push(
       `Report generated but could not be persisted: ${err instanceof Error ? err.message : String(err)}`,
