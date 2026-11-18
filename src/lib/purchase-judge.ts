@@ -509,8 +509,11 @@ export function judgePurchase(p: Purchase, hints: Hint[], cfg: JudgeConfig): Pur
         reason: `Rule 1: ${scanned.name}${scanned.form ? ` (${scanned.form})` : ""} was scanned at ${clock(scanned.ts)}${rec.other ? ` in purchase ${rec.id}` : ""}, within ${rules.matchToleranceS} s of this chunk.`,
       };
     }
+    // "After payment" is a chunk that reaches past it, not one that starts after it:
+    // an overlapping chunk that begins a second before the payment shows the same
+    // customer leaving with the paid goods.
     const carried =
-      s >= rec.closedAt && s <= rec.end && CARRY_AWAY.test(n) ? rec.paid.find((i) => compatible(seen, i)) : undefined;
+      e > rec.closedAt && s <= rec.end && CARRY_AWAY.test(n) ? rec.paid.find((i) => compatible(seen, i)) : undefined;
     if (carried) {
       return {
         outcome: "paid",

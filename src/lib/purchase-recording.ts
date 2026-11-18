@@ -96,7 +96,7 @@ async function cutRecording(
     [
       "-y", "-i", raw,
       "-vf", filter,
-      "-c:v", "libx264", "-profile:v", "main", "-level", "3.1", "-bf", "0",
+      "-c:v", "libx264", "-preset", "veryfast", "-profile:v", "main", "-level", "3.1", "-bf", "0",
       "-x264-params", `keyint=${FPS}:min-keyint=${FPS}:scenecut=0:range=tv`,
       "-an", "-movflags", "+faststart",
       small,

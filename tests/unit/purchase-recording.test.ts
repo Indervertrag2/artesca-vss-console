@@ -157,7 +157,7 @@ describe("recordingHints", () => {
     expect(vf(encodes[1])).toBe("scale=854:480:out_range=tv,fps=15,format=yuv420p");
     const rest = (a: string[]) => a.slice(a.indexOf("-vf") + 2, -1).join(" ");
     expect(rest(encodes[0])).toBe(
-      "-c:v libx264 -profile:v main -level 3.1 -bf 0 -x264-params keyint=15:min-keyint=15:scenecut=0:range=tv -an -movflags +faststart",
+      "-c:v libx264 -preset veryfast -profile:v main -level 3.1 -bf 0 -x264-params keyint=15:min-keyint=15:scenecut=0:range=tv -an -movflags +faststart",
     );
     expect(rest(encodes[1])).toBe(rest(encodes[0]));
 

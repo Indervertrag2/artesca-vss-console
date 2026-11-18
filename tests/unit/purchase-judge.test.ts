@@ -382,3 +382,21 @@ describe("evidence from the recording (#60)", () => {
     expect(isNegative("Nothing is scanned; a bottle is carried away.")).toBe(false);
   });
 });
+
+describe("rule 2 with overlapping chunks", () => {
+  // Paid at 19:02:36. A chunk that starts a second earlier shows the customer leaving with paid goods.
+  const p = only(till(64, "19:02:20Z", [["19:02:27Z", ITEM.orange], ["19:02:29Z", ITEM.pea]], "19:02:36Z"));
+  const leaving = "Yes - The green bag of chips is carried away from the scanner without being moved over it.";
+
+  it("explains a carrying-away hint whose chunk reaches past the payment", () => {
+    const v = judgePurchase(p, [hint("scanner-cam", "19:02:35Z", leaving)], CFG);
+    expect(v.incident).toBe(false);
+    expect(v.hints[0].outcome).toBe("paid");
+  });
+
+  it("keeps it when the chunk ends before the payment", () => {
+    const early = only(till(64, "19:02:20Z", [["19:02:27Z", ITEM.orange]], "19:02:50Z"));
+    const v = judgePurchase(early, [hint("scanner-cam", "19:02:35Z", leaving)], CFG);
+    expect(v.incident).toBe(true);
+  });
+});
