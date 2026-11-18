@@ -91,9 +91,9 @@ one, edit all.
 
 ## Page tree
 
-23 pages (22 in the nav plus `/cameras/bindings`), all server components by default; client components are scoped to interactive bits (forms, auto-refresh). The sidebar ([`Nav.tsx`](src/components/Nav.tsx)) groups them into four labeled sections — **Live** (Overview / Topology / Incidents / Cameras), **AI & Storage** (Search / Ask the Store / VSS Chat / Evidence / Storage / KV Cache), **Configure** (Scenarios / VLM Prompt / Tuning / Agent / Test Footage / Profiles), **System** (Secrets / Logs / Diagnostics / Sizing Studio / Settings / About); section headers are hidden in kiosk mode. Below the groups sits an external **AI Factory** link (`AI_FACTORY_URL`; absent when unset), rendered outside `NAV_GROUPS` on purpose: the ISV-ARCH-05 generator parses `NAV_GROUPS` as the page list, and the AI Factory is a separate app.
+24 pages (22 in the nav plus `/cameras/bindings` and `/cameras/sources`), all server components by default; client components are scoped to interactive bits (forms, auto-refresh). The sidebar ([`Nav.tsx`](src/components/Nav.tsx)) groups them into four labeled sections — **Live** (Overview / Topology / Incidents / Cameras), **AI & Storage** (Search / Ask the Store / VSS Chat / Evidence / Storage / KV Cache), **Configure** (Scenarios / VLM Prompt / Tuning / Agent / Test Footage / Profiles), **System** (Secrets / Logs / Diagnostics / Sizing Studio / Settings / About); section headers are hidden in kiosk mode. Below the groups sits an external **AI Factory** link (`AI_FACTORY_URL`; absent when unset), rendered outside `NAV_GROUPS` on purpose: the ISV-ARCH-05 generator parses `NAV_GROUPS` as the page list, and the AI Factory is a separate app.
 
-The pages: `/`, `/topology`, `/incidents`, `/chat`, `/search`, `/storage`, `/kvcache`, `/analytics`, `/evidence`, `/agent`, `/cameras`, `/cameras/bindings`, `/scenarios`, `/prompt`, `/tuning`, `/test-footage`, `/profiles`, `/secrets`, `/logs`, `/diagnostics`, `/sizing-studio`, `/settings`, `/about`.
+The pages: `/`, `/topology`, `/incidents`, `/chat`, `/search`, `/storage`, `/kvcache`, `/analytics`, `/evidence`, `/agent`, `/cameras`, `/cameras/bindings`, `/cameras/sources`, `/scenarios`, `/prompt`, `/tuning`, `/test-footage`, `/profiles`, `/secrets`, `/logs`, `/diagnostics`, `/sizing-studio`, `/settings`, `/about`.
 
 What each one does, and the traps in a few of them: [`docs/pages.md`](docs/pages.md).
 
@@ -159,7 +159,8 @@ Three things from it that bite:
 
 | What | k8s path | docker path |
 | ---- | --------- | ----------- |
-| Sessions, profiles, audit log, incident reports (`incident_reports`) | SQLite on PVC `console-data` (5 Gi) | SQLite on PVC `console-data` (5 Gi) |
+| Sessions, profiles, audit log, incident reports (`incident_reports`), external-source events (`source_events`, 7 days) | SQLite on PVC `console-data` (5 Gi) | SQLite on PVC `console-data` (5 Gi) |
+| External sources (tills, scales) | The config store (`sources`); only the SHA-256 of each source's token is stored. | n/a |
 | Camera registrations | The config store (`cameras`); reconcile loop converges the in-cluster `register-cameras` Job from it. | ConfigMap `cameras` in ns `pyramid-ingress` + GCS canonical `cameras/<vss-instance>.json`; `camera-restore-watcher` keeps them in sync. |
 | VLM system prompt | The config store (`promptSets` + `activePromptId`); reconcile loop converges ConfigMap `rtvi-runtime-env`. | ConfigMap `rtvi-runtime-env` (key `RTVI_VLM_SYSTEM_PROMPT`) + GCS canonical `prompt/<vss-instance>.json`. |
 | Alert scenarios | The config store (`scenarios`); reconcile loop converges ConfigMap `scenarios`. | ConfigMap `scenarios` (key `scenarios.yaml`) + GCS canonical `scenarios/<vss-instance>.json`. |
@@ -187,14 +188,14 @@ node scripts/diagrams/build-flow.mjs flow.json ../isv-portal/presentations/diagr
 
 **ISV-ARCH-05** draws the operator surface.
 
-Draws the operator surface: the 22 pages by what kiosk mode does to each, the config-store entities shared with the deployer, and what the 70 API routes reach. Everything on it is read from source at run time — pages from [`Nav.tsx`](src/components/Nav.tsx), kiosk state from [`lib/kiosk.ts`](src/lib/kiosk.ts), shared state from the `ConfigStore` contract, backend reach from a walk of each route's `@/lib` imports. The scene builder is shared with the other sheets and lives in `scality/isv-portal` under `presentations/diagrams/lib/` (clone it next to this repository); the generator stays here, because it can only read this repo's source from inside it.
+Draws the operator surface: the 22 pages by what kiosk mode does to each, the config-store entities shared with the deployer, and what the 74 API routes reach. Everything on it is read from source at run time — pages from [`Nav.tsx`](src/components/Nav.tsx), kiosk state from [`lib/kiosk.ts`](src/lib/kiosk.ts), shared state from the `ConfigStore` contract, backend reach from a walk of each route's `@/lib` imports. The scene builder is shared with the other sheets and lives in `scality/isv-portal` under `presentations/diagrams/lib/` (clone it next to this repository); the generator stays here, because it can only read this repo's source from inside it.
 
 ⚠ **The import walk follows `await import()` as well as `from`.** The reconcile context is reached dynamically at all 16 of its call sites, so a static-only walk concludes that no route touches the config store — which is exactly backwards, since that path is how cameras, prompt and scenarios are written.
 
 Two things the walk surfaced:
 
 - **Every nav page is in exactly one kiosk list** (`tests/unit/kiosk.test.ts` pins it). [`proxy.ts`](src/proxy.ts) redirects a page in neither to `/`, even when a kiosk page links to it: the overview hero's storage tile (`/storage`) and chat's search thumbnails (`/search?q=`) did, until `/evidence` went to the hidden list (Seal writes WORM objects and its route has no `rejectIfKiosk`) and `/search`, `/analytics` and `/storage` to the allowed one. The `/kvcache` explainer's `/evidence` link still leads to `/` in kiosk mode.
-- **Still open: seven mutating routes outlive their own page.** `proxy.ts` states that "mutating API routes are already guarded by `rejectIfKiosk()` in each handler", and 18 of 34 are. The other 16 include seven under a page kiosk hides — `/api/cameras/[id]` (PUT/PATCH/DELETE), `/api/cameras/[id]/restart`, the three `sync-gcs` routes and `/api/diagnostics/[test]`. `/api/cameras/[id]` DELETE is the sharpest: the sibling collection route `/api/cameras` POST *does* guard, so the asymmetry is within one resource. `/api/settings/kiosk` is exempt by design and named as such in the dumper — it is the exit from kiosk mode, and guarding it would trap the session.
+- **Still open: seven mutating routes outlive their own page.** `proxy.ts` states that "mutating API routes are already guarded by `rejectIfKiosk()` in each handler", and 21 of 38 are. The other 17 include seven under a page kiosk hides — `/api/cameras/[id]` (PUT/PATCH/DELETE), `/api/cameras/[id]/restart`, the three `sync-gcs` routes and `/api/diagnostics/[test]`. `/api/cameras/[id]` DELETE is the sharpest: the sibling collection route `/api/cameras` POST *does* guard, so the asymmetry is within one resource. `/api/settings/kiosk` is exempt by design and named as such in the dumper — it is the exit from kiosk mode, and guarding it would trap the session. So is `/api/sources/[id]/events`: a till posts to it with its token, never a browser.
 
 ## Issue tracking — GitHub, not Jira
 

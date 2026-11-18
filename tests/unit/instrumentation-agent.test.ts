@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const startReconcileLoop = vi.fn(async () => {});
 vi.mock("@/lib/reconcile-agent", () => ({ startReconcileLoop }));
+// The source poller would start a real 2.5 s interval against the config store.
+vi.mock("@/lib/source-poll", () => ({ startSourcePoller: vi.fn() }));
 
 describe("instrumentation register() — agent mode", () => {
   const OLD = { ...process.env };

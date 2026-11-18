@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const startReconcileLoop = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/lib/reconcile-agent", () => ({ startReconcileLoop }));
+// The source poller would start a real 2.5 s interval against the config store.
+vi.mock("@/lib/source-poll", () => ({ startSourcePoller: vi.fn() }));
 vi.mock("@/lib/deprecation-filter", () => ({ filterKnownUpstreamWarnings: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn() }) }));
 

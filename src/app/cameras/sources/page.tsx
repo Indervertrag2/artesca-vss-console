@@ -159,8 +159,12 @@ export default function ExternalSourcesPage() {
   const [formMsg, setFormMsg] = React.useState<string | null>(null);
   /** The token, held only until the page is left: the API returns it once. */
   const [revealed, setRevealed] = React.useState<{ id: string; token: string } | null>(null);
-  const [origin, setOrigin] = React.useState("");
-  React.useEffect(() => setOrigin(window.location.origin), []);
+  // The browser's origin, empty on the server render so hydration matches.
+  const origin = React.useSyncExternalStore(
+    () => () => {},
+    () => window.location.origin,
+    () => "",
+  );
 
   const list = useQuery({
     queryKey: ["sources"],
