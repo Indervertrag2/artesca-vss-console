@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { MarkdownReport, isSafeUrl } from "@/components/MarkdownReport";
 import { useToast } from "@/hooks/use-toast";
-import { FileText, Loader2, RefreshCw } from "lucide-react";
+import { FileText, Loader2, MessageSquare, RefreshCw } from "lucide-react";
+import { incidentChatHref } from "@/lib/incident-chat";
 import { ClipPlayer } from "./ClipPlayer";
 import type { Incident } from "@/lib/types";
 
@@ -127,11 +129,8 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
 
   if (!incident) return null;
 
-  const clipUrl = buildClipUrl(
-    incident.sensorId,
-    incident.ts,
-    (incident.raw as { end?: unknown } | null | undefined)?.end,
-  );
+  const end = (incident.raw as { end?: unknown } | null | undefined)?.end;
+  const clipUrl = buildClipUrl(incident.sensorId, incident.ts, end);
   const rawJson = JSON.stringify(incident.raw, null, 2);
 
   const copyRaw = async () => {
@@ -261,23 +260,31 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
             <div>
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground">Incident Report</p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 px-2 text-[11px]"
-                  disabled={report.phase === "loading"}
-                  onClick={() => void generateReport(reportButtonForce)}
-                >
-                  {report.phase === "loading" ? (
-                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                  ) : report.phase === "ready" ? (
-                    <RefreshCw className="mr-1.5 h-3 w-3" />
-                  ) : (
-                    <FileText className="mr-1.5 h-3 w-3" />
-                  )}
-                  {reportButtonLabel}
-                </Button>
+                <div className="flex items-center gap-1.5">
+                  <Button asChild variant="outline" size="sm" className="h-7 px-2 text-[11px]">
+                    <Link href={incidentChatHref(incident.sensorId, incident.ts, end)}>
+                      <MessageSquare className="mr-1.5 h-3 w-3" />
+                      Chat about this incident
+                    </Link>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[11px]"
+                    disabled={report.phase === "loading"}
+                    onClick={() => void generateReport(reportButtonForce)}
+                  >
+                    {report.phase === "loading" ? (
+                      <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                    ) : report.phase === "ready" ? (
+                      <RefreshCw className="mr-1.5 h-3 w-3" />
+                    ) : (
+                      <FileText className="mr-1.5 h-3 w-3" />
+                    )}
+                    {reportButtonLabel}
+                  </Button>
+                </div>
               </div>
 
               {report.phase === "error" && (

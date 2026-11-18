@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useSearchParams } from "next/navigation";
 import { Bot, CheckCircle2, Loader2, Mic, MicOff, Send, User, Video, Volume2, XCircle } from "lucide-react";
 import { Shell } from "@/components/Shell";
 import { MarkdownReport } from "@/components/MarkdownReport";
 import { useVoice, stripMarkdownForSpeech } from "@/lib/use-voice";
 import { useAgentUiUrl } from "@/components/BoxModeProvider";
+import { incidentChatPrefill } from "@/lib/incident-chat";
 
 type Role = "user" | "assistant" | "system";
 type Message = { role: Role; content: string; ts: string };
@@ -145,8 +147,21 @@ function ReasoningBlock({ steps }: { steps: ReasoningStep[] }) {
 
 const noSubscribe = () => () => {};
 
+// useSearchParams on a prerendered page needs a Suspense boundary (Next 16).
 export default function ChatPage() {
+  return (
+    <Suspense fallback={<Shell>{null}</Shell>}>
+      <Chat />
+    </Suspense>
+  );
+}
+
+function Chat() {
   const upstreamUiUrl = useAgentUiUrl();
+  // "Chat about this incident" (?sensor=&ts=&end=): scope to the sensor and
+  // prefill an editable question. Read once; the effect below drops the params.
+  const searchParams = useSearchParams();
+  const [prefill] = useState(() => incidentChatPrefill(searchParams?.toString() ?? ""));
   const [messages, setMessages] = useState<Message[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -156,12 +171,13 @@ export default function ChatPage() {
       return [];
     }
   });
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(prefill?.question ?? "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showReasoning, setShowReasoning] = useState(false);
   const [cameras, setCameras] = useState<Camera[] | null>(null);
   const [scope, setScope] = useState<string>(() => {
+    if (prefill) return prefill.sensor;
     if (typeof window === "undefined") return SCOPE_ALL;
     try {
       return localStorage.getItem(SCOPE_KEY) ?? SCOPE_ALL;
@@ -216,6 +232,12 @@ export default function ChatPage() {
     };
   }, []);
 
+  // Drop the incident params, so a reload does not overwrite the operator's
+  // edits. The native History API keeps the Next router in sync.
+  useEffect(() => {
+    if (prefill) window.history.replaceState(null, "", window.location.pathname);
+  }, [prefill]);
+
   // Persist scope.
   useEffect(() => {
     try {
@@ -264,8 +286,9 @@ export default function ChatPage() {
   }, []);
 
   // Resolve scope → camera record for hint rendering + system-message context.
-  const scopedCamera = useMemo(
-    () => (scope === SCOPE_ALL ? null : cameras?.find((c) => c.id === scope) ?? null),
+  // A sensor outside /api/cameras (e.g. one an incident linked to) still scopes.
+  const scopedCamera = useMemo<Camera | null>(
+    () => (scope === SCOPE_ALL ? null : cameras?.find((c) => c.id === scope) ?? { id: scope }),
     [scope, cameras],
   );
   const liveCount = useMemo(
@@ -624,6 +647,9 @@ export default function ChatPage() {
               <option value={SCOPE_ALL}>
                 All cameras{cameras ? ` (${cameras.length} registered, ${liveCount} live)` : ""}
               </option>
+              {scopedCamera && !cameras?.some((c) => c.id === scopedCamera.id) && (
+                <option value={scopedCamera.id}>{scopedCamera.id}</option>
+              )}
               {(cameras ?? []).map((c) => {
                 const live = c.feeds?.some((f) => f.vstRegistered) ? "● " : "○ ";
                 return (
