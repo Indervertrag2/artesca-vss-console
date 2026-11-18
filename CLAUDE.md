@@ -159,7 +159,7 @@ Three things from it that bite:
 
 | What | k8s path | docker path |
 | ---- | --------- | ----------- |
-| Sessions, profiles, audit log, incident reports (`incident_reports`), external-source events (`source_events`, 7 days) | SQLite on PVC `console-data` (5 Gi) | SQLite on PVC `console-data` (5 Gi) |
+| Sessions, profiles, audit log, incident reports (`incident_reports`), external-source events (`source_events`, 7 days), purchase verdicts of multi-camera scenarios (`purchase_evaluations`, 30 days) | SQLite on PVC `console-data` (5 Gi) | SQLite on PVC `console-data` (5 Gi) |
 | External sources (tills, scales) | The config store (`sources`); only the SHA-256 of each source's token is stored. | n/a |
 | Camera registrations | The config store (`cameras`); reconcile loop converges the in-cluster `register-cameras` Job from it. | ConfigMap `cameras` in ns `pyramid-ingress` + GCS canonical `cameras/<vss-instance>.json`; `camera-restore-watcher` keeps them in sync. |
 | VLM system prompt | The config store (`promptSets` + `activePromptId`); reconcile loop converges ConfigMap `rtvi-runtime-env`. | ConfigMap `rtvi-runtime-env` (key `RTVI_VLM_SYSTEM_PROMPT`) + GCS canonical `prompt/<vss-instance>.json`. |

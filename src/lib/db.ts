@@ -84,6 +84,20 @@ export function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS source_events_by_source ON source_events (source_id, id);
     CREATE INDEX IF NOT EXISTS source_events_by_key ON source_events (source_id, dedupe_key);
     CREATE INDEX IF NOT EXISTS source_events_by_received ON source_events (received_at);
+
+    -- One row per purchase a multi-camera scenario judged (purchase-runner.ts),
+    -- incident or not: the key makes the evaluation run once.
+    CREATE TABLE IF NOT EXISTS purchase_evaluations (
+      scenario_id  TEXT NOT NULL,
+      source_id    TEXT NOT NULL,
+      purchase_id  TEXT NOT NULL,
+      closed_at    TEXT NOT NULL,
+      evaluated_at TEXT NOT NULL,
+      incident     INTEGER NOT NULL,
+      verdict_json TEXT NOT NULL,
+      PRIMARY KEY (scenario_id, source_id, purchase_id, closed_at)
+    );
+    CREATE INDEX IF NOT EXISTS purchase_evaluations_by_incident ON purchase_evaluations (incident, closed_at);
   `);
 
   if (!_signalHandlersRegistered) {

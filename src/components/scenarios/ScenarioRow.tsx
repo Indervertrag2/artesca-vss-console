@@ -16,22 +16,45 @@ import {
 import { Trash2, Copy } from "lucide-react";
 import { KeywordChips } from "./KeywordChips";
 import { SensorFilterInput } from "./SensorFilterInput";
+import { MultiCameraConfig, type PurchaseStatusView } from "./MultiCameraConfig";
+import { DEFAULT_RULES } from "@/lib/purchase-judge";
 
 interface ScenarioRowProps {
   scenario: Scenario;
   onChange: (updated: Scenario) => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  /** Pickable ids for the multi-camera form. */
+  cameraIds?: string[];
+  sourceIds?: string[];
+  purchaseStatus?: PurchaseStatusView;
 }
 
 const CHANNELS: Array<"ui" | "slack"> = ["ui", "slack"];
+const COLUMNS = 8;
 
 export function ScenarioRow({
   scenario,
   onChange,
   onDelete,
   onDuplicate,
+  cameraIds = [],
+  sourceIds = [],
+  purchaseStatus,
 }: ScenarioRowProps) {
+  const multi = scenario.mode === "multi";
+  const setMode = (mode: string) =>
+    onChange(
+      mode === "multi"
+        ? {
+            ...scenario,
+            mode: "multi",
+            cameras: scenario.cameras ?? [],
+            sources: scenario.sources ?? [],
+            rules: scenario.rules ?? DEFAULT_RULES,
+          }
+        : (({ mode: _m, cameras: _c, sources: _s, rules: _r, productClasses: _p, ...rest }) => rest)(scenario),
+    );
   const update = <K extends keyof Scenario>(key: K, value: Scenario[K]) => {
     onChange({ ...scenario, [key]: value });
   };
@@ -47,20 +70,31 @@ export function ScenarioRow({
   };
 
   return (
-    <TableRow>
+    <>
+    <TableRow className={multi ? "border-b-0" : undefined}>
       <TableCell className="w-12">
         <Switch
           checked={scenario.enabled}
           onCheckedChange={(v) => update("enabled", v)}
         />
       </TableCell>
-      <TableCell className="min-w-[240px]">
+      <TableCell className="min-w-[240px] space-y-1">
         <Input
           value={scenario.name}
           onChange={(e) => update("name", e.target.value)}
           className="h-8 text-sm"
           placeholder="Scenario name"
         />
+        <select
+          aria-label="Mode"
+          value={multi ? "multi" : "single"}
+          onChange={(e) => setMode(e.target.value)}
+          className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs"
+          title="Single camera: each camera alerts on its own. Multi-camera: cameras work together, one incident per till purchase."
+        >
+          <option value="single">Single camera</option>
+          <option value="multi">Multi-camera (one incident per purchase)</option>
+        </select>
       </TableCell>
       <TableCell className="min-w-[200px]">
         <KeywordChips
@@ -178,5 +212,19 @@ export function ScenarioRow({
         </div>
       </TableCell>
     </TableRow>
+    {multi && (
+      <TableRow>
+        <TableCell colSpan={COLUMNS} className="pt-0">
+          <MultiCameraConfig
+            scenario={scenario}
+            onChange={onChange}
+            cameraIds={cameraIds}
+            sourceIds={sourceIds}
+            status={purchaseStatus}
+          />
+        </TableCell>
+      </TableRow>
+    )}
+    </>
   );
 }

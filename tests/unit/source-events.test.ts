@@ -12,7 +12,7 @@ import {
   newSourceToken,
   tokenMatches,
 } from "@/lib/source-events";
-import { pollTill } from "@/lib/source-poll";
+import { importTillHistory, pollTill } from "@/lib/source-poll";
 import { getDb } from "@/lib/db";
 import type { SourceEntry } from "@/lib/config-store/types";
 
@@ -153,6 +153,15 @@ describe("pollTill", () => {
     // The next pass reads the boundary again and stores nothing new.
     expect(await pollTill(till, fetchImpl, NOW + 2500)).toBe(0);
     expect(listSourceEvents("pull-till", { limit: 10 }).events).toHaveLength(4);
+  });
+
+  it("imports a till's history from a given time once, deduplicated against the poll (#59)", async () => {
+    const { calls, fetchImpl } = fakeTill();
+    const hist = { ...till, id: "hist-till", mode: "push" as const };
+    expect(await importTillHistory(hist, "2026-11-18T15:00:00.000Z", fetchImpl)).toBe(4);
+    expect(calls).toContain("/api/scans?since=2026-11-18T15%3A00%3A00Z");
+    expect(await importTillHistory(hist, "2026-11-18T15:00:00Z", fetchImpl)).toBe(0);
+    expect(listSourceEvents("hist-till", { limit: 10 }).events).toHaveLength(4);
   });
 
   it("throws when the till does not answer, so the poller can show it", async () => {

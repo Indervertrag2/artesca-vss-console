@@ -15,6 +15,7 @@
 import { z } from "zod";
 import { CONFIG_SCHEMA } from "@/lib/config-store/file";
 import { CAMERA_ID_RE, CameraRecordingSchema, RTSP_URL_RE } from "@/lib/schemas";
+import { ScenarioMultiFields } from "@/lib/purchase-judge";
 
 export const FILL_LISTS = ["cameras", "scenarios", "promptSets"] as const;
 export type FillList = (typeof FILL_LISTS)[number];
@@ -73,6 +74,7 @@ export const FillScenarioSchema = z
     keywords: z.array(z.string().max(200)).max(256),
     enabled: z.boolean(),
     cooldown_seconds: z.number().int().nonnegative().max(86400).optional(),
+    ...ScenarioMultiFields,
     ...STAMPS,
   })
   .strict();

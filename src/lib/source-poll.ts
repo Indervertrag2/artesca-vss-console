@@ -160,6 +160,17 @@ export async function pollTill(source: SourceEntry, fetchImpl: typeof fetch = fe
   return added;
 }
 
+/**
+ * Read a till's purchases and bookings since `since` once, with the same events and
+ * deduplication as the poll. The poll starts 15 minutes back when a source is new,
+ * so purchases from before that are only in the log after this. Works for a push
+ * source too, as long as it has a base URL. Returns how many events were new.
+ */
+export async function importTillHistory(source: SourceEntry, since: string, fetchImpl: typeof fetch = fetch): Promise<number> {
+  shared.cursors.set(source.id, isoSeconds(Date.parse(since)));
+  return pollTill(source, fetchImpl);
+}
+
 /** One pass over every pulling source. Records each source's outcome for the page. */
 export async function pollAllSources(instance: string, fetchImpl: typeof fetch = fetch): Promise<void> {
   let sources: SourceEntry[];

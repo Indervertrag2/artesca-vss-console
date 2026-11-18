@@ -17,6 +17,7 @@ import {
   type ScenarioConfig,
 } from "@/lib/helpers/gcs-config";
 import { scenarioToGcsConfig } from "@/lib/helpers/scenarios-apply";
+import { multiFields } from "@/lib/purchase-judge";
 import fs from "fs/promises";
 import path from "path";
 
@@ -71,6 +72,7 @@ function scenarioEntryToClient(s: ScenarioEntry): Scenario {
     keywords: s.keywords,
     enabled: s.enabled,
     cooldownSeconds: s.cooldown_seconds,
+    ...multiFields(s),
   };
 }
 
@@ -85,6 +87,7 @@ function clientToScenarioEntry(s: Scenario): ScenarioEntry {
     keywords: s.keywords,
     enabled: s.enabled,
     ...(s.cooldownSeconds !== undefined ? { cooldown_seconds: s.cooldownSeconds } : {}),
+    ...multiFields(s),
   };
 }
 
@@ -118,7 +121,21 @@ export async function GET() {
     try {
       const ctx = await makeReconcileContext();
       const scenarios = (await ctx.store.readScenarios(ctx.instance)).map(scenarioEntryToClient);
-      return NextResponse.json({ scenarios, resourceVersion: null, gcs: { available: false }, warnings });
+      // For the multi-camera form: the ids it can pick, and each scenario's last judged purchase.
+      const [cameras, sources] = await Promise.all([
+        ctx.store.readCameras(ctx.instance).catch(() => []),
+        ctx.store.readSources(ctx.instance).catch(() => []),
+      ]);
+      const { purchaseStatus } = await import("@/lib/purchase-runner");
+      return NextResponse.json({
+        scenarios,
+        resourceVersion: null,
+        gcs: { available: false },
+        warnings,
+        cameraIds: cameras.map((c) => c.id),
+        sourceIds: sources.map((s) => s.id),
+        purchaseStatus: purchaseStatus(scenarios.filter((s) => s.mode === "multi").map((s) => s.id)),
+      });
     } catch (err) {
       warnings.push(`config store unavailable: ${err instanceof Error ? err.message : String(err)}`);
       return NextResponse.json({ scenarios: [], gcs: { available: false }, warnings });

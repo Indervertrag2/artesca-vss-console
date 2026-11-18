@@ -15,8 +15,10 @@ import { Card } from "@/components/ui/card";
 import { MarkdownReport, isSafeUrl } from "@/components/MarkdownReport";
 import { useToast } from "@/hooks/use-toast";
 import { FileText, Loader2, MessageSquare, RefreshCw } from "lucide-react";
-import { incidentChatHref } from "@/lib/incident-chat";
+import { incidentChatHref, incidentClipUrl } from "@/lib/incident-chat";
+import { purchaseVerdictOf } from "@/lib/purchase-judge";
 import { ClipPlayer } from "./ClipPlayer";
+import { PurchaseIncidentDetail } from "./PurchaseIncidentDetail";
 import type { Incident } from "@/lib/types";
 
 // Monaco is heavy — load it lazily so the incidents table renders fast
@@ -28,14 +30,6 @@ const MonacoEditor = dynamic(
 interface IncidentDetailProps {
   incident: Incident | null;
   onClose: () => void;
-}
-
-function buildClipUrl(sensorId: string, ts: string, end: unknown) {
-  // Encode the timestamp so slashes / colons don't break the URL
-  const safeTs = encodeURIComponent(ts);
-  // `ts` is the chunk start; the chunk end widens the clip to the whole chunk.
-  const q = typeof end === "string" && end ? `?end=${encodeURIComponent(end)}` : "";
-  return `/api/clips/${encodeURIComponent(sensorId)}/${safeTs}/index.m3u8${q}`;
 }
 
 /** How many seconds into the clip the incident occurred.
@@ -133,8 +127,11 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
 
   if (!incident) return null;
 
+  const verdict = purchaseVerdictOf(incident);
+  if (verdict) return <PurchaseIncidentDetail incident={incident} verdict={verdict} onClose={onClose} />;
+
   const end = (incident.raw as { end?: unknown } | null | undefined)?.end;
-  const clipUrl = buildClipUrl(incident.sensorId, incident.ts, end);
+  const clipUrl = incidentClipUrl(incident.sensorId, incident.ts, end);
   const rawJson = JSON.stringify(incident.raw, null, 2);
 
   const copyRaw = async () => {

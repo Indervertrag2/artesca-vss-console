@@ -1,4 +1,5 @@
 import type { CameraEntry } from "@/lib/helpers/gcs-config";
+import type { ScenarioMulti } from "@/lib/purchase-judge";
 
 export type { CameraEntry };
 
@@ -11,8 +12,10 @@ export interface PromptDoc {
 /** A named, reusable VLM system prompt ("use case"). */
 export interface PromptSet { id: string; name: string; text: string; model?: string; alertType?: string }
 
-/** A single alert-scenario entry stored in the config store. */
-export interface ScenarioEntry {
+/** A single alert-scenario entry stored in the config store. The multi-camera
+ *  fields (`mode: "multi"`, cameras, sources, rules, productClasses) are present
+ *  only on a multi-camera scenario; see purchase-judge.ts. */
+export interface ScenarioEntry extends ScenarioMulti {
   id: string;
   name: string;
   description?: string;

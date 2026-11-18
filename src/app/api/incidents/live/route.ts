@@ -11,16 +11,17 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { CLUSTER } from "@/lib/cluster-refs";
 import { createSseResponse } from "@/lib/streams/sse";
 import { IncidentSchema } from "@/lib/schemas";
 import { fromAlertBridge, alertBridgeIncidentKey } from "@/lib/helpers/incident-wire";
+import { listRealtimeIncidents } from "@/lib/helpers/alert-bridge";
+import { hiddenCameraIds, listPurchaseIncidents } from "@/lib/purchase-runner";
+import { PURCHASE_KIND } from "@/lib/purchase-judge";
 import type { Incident } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const ALERT_BRIDGE_URL = CLUSTER.alertBridge.url;
 const POLL_MS = 4_000;
 const SEEN_CAP = 2_000;
 
@@ -36,30 +37,30 @@ export async function GET(req: NextRequest) {
 
     const poll = async () => {
       try {
-        const resp = await fetch(
-          `${ALERT_BRIDGE_URL}/api/v1/realtime/incidents?limit=50`,
-          {
-            // Bound each poll so a slow/unreachable bridge can't stall the
-            // stream open (the initial poll is awaited before the interval).
-            signal: AbortSignal.any([req.signal, AbortSignal.timeout(POLL_MS)]),
-            next: { revalidate: 0 },
-          }
+        // Bound each poll so a slow/unreachable bridge can't stall the
+        // stream open (the initial poll is awaited before the interval).
+        const list = await listRealtimeIncidents(
+          50,
+          AbortSignal.any([req.signal, AbortSignal.timeout(POLL_MS)]),
         );
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const list: unknown[] = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.incidents)
-            ? (data.incidents as unknown[])
-            : [];
+        // Alerts of multi-camera scenario cameras are hints inside a purchase
+        // incident; those come from SQLite (purchase-runner.ts).
+        const hidden = await hiddenCameraIds();
+        const items = [
+          ...[...list].reverse().map((raw) => ({ key: alertBridgeIncidentKey(raw), inc: fromAlertBridge(raw) })),
+          ...listPurchaseIncidents(50)
+            .reverse()
+            .map((inc) => ({ key: `purchase:${inc.ts}::${inc.sensorId}`, inc })),
+        ];
         // Oldest-first so events arrive in chronological order.
-        for (const raw of [...list].reverse()) {
-          const key = alertBridgeIncidentKey(raw);
+        for (const { key, inc } of items) {
           if (seen.has(key)) continue;
           seen.add(key);
           if (!primed) continue; // first pass: record only, don't replay the backlog
-          const result = IncidentSchema.safeParse(fromAlertBridge(raw));
-          if (result.success) write(result.data as Incident);
+          const result = IncidentSchema.safeParse(inc);
+          if (result.success && (result.data.topic === PURCHASE_KIND || !hidden.has(result.data.sensorId))) {
+            write(result.data as Incident);
+          }
         }
         primed = true;
         // Bound memory on long-lived connections (oldest keys first; the live

@@ -15,6 +15,64 @@ export interface RealtimeRule {
   sensor_name?: string;
 }
 
+// ─── listRealtimeIncidents ────────────────────────────────────────────────────
+
+export class AlertBridgeHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`alert-bridge returned HTTP ${status}`);
+    this.name = "AlertBridgeHttpError";
+  }
+}
+
+/** The bridge's latest incidents, raw (map them with `fromAlertBridge`). The bridge
+ *  wraps the list as `{ status, incidents, count, total }`; a bare array is read too.
+ *  Throws AlertBridgeHttpError on a non-2xx answer, the fetch error otherwise. */
+export async function listRealtimeIncidents(limit: number, signal?: AbortSignal): Promise<unknown[]> {
+  const resp = await fetch(
+    `${CLUSTER.alertBridge.url}/api/v1/realtime/incidents?limit=${encodeURIComponent(String(limit))}`,
+    { next: { revalidate: 0 }, signal: signal ?? AbortSignal.timeout(5_000) },
+  );
+  if (!resp.ok) throw new AlertBridgeHttpError(resp.status);
+  return incidentList(await resp.json());
+}
+
+function incidentList(data: unknown): unknown[] {
+  if (Array.isArray(data)) return data;
+  const list = (data as { incidents?: unknown } | null)?.incidents;
+  return Array.isArray(list) ? list : [];
+}
+
+const bridgeTime = (iso: string) => new Date(iso).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+/**
+ * The bridge's incidents between two times, page by page (`start_time`, `end_time`,
+ * `limit`, `offset`; the bridge keeps them 7 days). Callers still filter by time:
+ * a bridge that ignores `end_time` returns everything after `start_time`, which the
+ * page cap bounds. Throws like listRealtimeIncidents.
+ */
+export async function listRealtimeIncidentsBetween(start: string, end: string, pageSize = 1000, maxPages = 10): Promise<unknown[]> {
+  const out: unknown[] = [];
+  for (let page = 0; page < maxPages; page++) {
+    const q = new URLSearchParams({
+      start_time: bridgeTime(start),
+      end_time: bridgeTime(end),
+      limit: String(pageSize),
+      offset: String(page * pageSize),
+    });
+    const resp = await fetch(`${CLUSTER.alertBridge.url}/api/v1/realtime/incidents?${q}`, {
+      next: { revalidate: 0 },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!resp.ok) throw new AlertBridgeHttpError(resp.status);
+    const data = (await resp.json()) as { total?: unknown } | unknown[];
+    const list = incidentList(data);
+    out.push(...list);
+    const total = !Array.isArray(data) && typeof data?.total === "number" ? data.total : 0;
+    if (list.length < pageSize || out.length >= total) break;
+  }
+  return out;
+}
+
 // ─── listRealtimeRules ────────────────────────────────────────────────────────
 
 /** List all realtime alert rules from the alert-bridge.

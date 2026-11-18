@@ -5,9 +5,11 @@ import { stringify as yamlStringify } from "yaml";
 export interface ScenarioRefs { ns: string; configMap: string; yamlKey: string; alertWorkerDeployment: string }
 export interface ScenarioReconcileResult { updated: boolean; skipped?: string; error?: string }
 
-/** Default serializer: the ConfigMap payload shape `{ scenarios: [...] }` as YAML. */
+/** Default serializer: the ConfigMap payload shape `{ scenarios: [...] }` as YAML.
+ *  A multi-camera scenario is judged by the console (purchase-runner.ts), not by
+ *  the alert worker's keyword matching, so it is left out. */
 export function serializeScenarios(scenarios: ScenarioEntry[]): string {
-  return yamlStringify({ scenarios });
+  return yamlStringify({ scenarios: scenarios.filter((s) => s.mode !== "multi") });
 }
 
 /**

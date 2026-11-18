@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { BUCKET_TOTALS_STATES } from "@/lib/storage/bucket-scan";
+import { ScenarioMultiFields } from "@/lib/purchase-judge";
 
 export const HealthSchema = z.enum(["ok", "warn", "fail", "unknown"]);
 
@@ -66,6 +67,8 @@ export const ScenarioSchema = z.object({
   keywords: z.array(z.string()),
   enabled: z.boolean(),
   cooldownSeconds: z.number().int().nonnegative().optional(),
+  // Multi-camera mode: one incident per purchase (purchase-judge.ts).
+  ...ScenarioMultiFields,
   // Optional: seal this scenario's incident clips into ARTESCA Object Lock (WORM).
   immutable: z
     .object({

@@ -230,6 +230,21 @@ export default function ExternalSourcesPage() {
     onError: fail("Rotate failed"),
   });
 
+  const [importSince, setImportSince] = React.useState("");
+  const importHistory = useMutation({
+    mutationFn: (v: { id: string; since: string }) =>
+      call(`/api/sources/${v.id}/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ since: v.since }),
+      }) as Promise<{ added: number }>,
+    onSuccess: (r) => {
+      toast({ title: "History imported", description: `${r.added} new event${r.added === 1 ? "" : "s"}.` });
+      refresh();
+    },
+    onError: fail("Import failed"),
+  });
+
   const test = useMutation({
     mutationFn: async (baseUrl: string) =>
       SourceHealthSchema.parse(
@@ -651,6 +666,33 @@ export default function ExternalSourcesPage() {
                 >
                   <KeyRound className="h-3.5 w-3.5 mr-1.5" />
                   Rotate token
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {current?.type === "till" && current.baseUrl && (
+            <div className="rounded-md border border-border p-4 space-y-2 text-xs">
+              <h3 className="text-sm font-semibold">Import history</h3>
+              <p className="text-muted-foreground">
+                Reads this till&apos;s purchases and bookings since the given time once, into the same log and without
+                duplicates, so earlier purchases can be judged by a multi-camera scenario.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="datetime-local"
+                  aria-label="Import since"
+                  className={cn(INPUT, "w-56")}
+                  value={importSince}
+                  onChange={(e) => setImportSince(e.target.value)}
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!importSince || importHistory.isPending}
+                  onClick={() => importHistory.mutate({ id: current.id, since: new Date(importSince).toISOString() })}
+                >
+                  {importHistory.isPending ? "Importing…" : "Import history"}
                 </Button>
               </div>
             </div>

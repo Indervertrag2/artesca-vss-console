@@ -28,10 +28,23 @@ const GcsStatusSchema = z.object({
   totalScenarios: z.number().optional(),
 });
 
+const PurchaseStatusSchema = z.object({
+  purchaseId: z.string().optional(),
+  closedAt: z.string().optional(),
+  evaluatedAt: z.string().optional(),
+  incident: z.boolean().optional(),
+  summary: z.string().optional(),
+  error: z.string().optional(),
+});
+
 const ScenarioListSchema = z.object({
   scenarios: z.array(ScenarioSchema),
   gcs: GcsStatusSchema.optional(),
   warnings: z.array(z.string()).optional(),
+  // For the multi-camera form.
+  cameraIds: z.array(z.string()).optional(),
+  sourceIds: z.array(z.string()).optional(),
+  purchaseStatus: z.record(PurchaseStatusSchema).optional(),
 });
 
 function generateId() {
@@ -304,6 +317,9 @@ export function ScenarioTable() {
                 onChange={updateScenario}
                 onDelete={() => deleteScenario(scenario.id)}
                 onDuplicate={() => duplicateScenario(scenario)}
+                cameraIds={data?.cameraIds}
+                sourceIds={data?.sourceIds}
+                purchaseStatus={data?.purchaseStatus?.[scenario.id]}
               />
             ))}
           </TableBody>

@@ -11,9 +11,18 @@ function parseDate(s: string | null): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
-export function incidentChatHref(sensorId: string, ts: string, end?: unknown): string {
+/** The HLS playlist of an incident's clip, the other link the incident dialog builds.
+ *  `ts` is the chunk start; a string `end` widens the clip to the span (clipWindow). */
+export function incidentClipUrl(sensorId: string, ts: string, end?: unknown): string {
+  const q = typeof end === "string" && end ? `?end=${encodeURIComponent(end)}` : "";
+  return `/api/clips/${encodeURIComponent(sensorId)}/${encodeURIComponent(ts)}/index.m3u8${q}`;
+}
+
+/** `question` replaces the default first message (a purchase incident sends its till record). */
+export function incidentChatHref(sensorId: string, ts: string, end?: unknown, question?: string): string {
   const q = typeof end === "string" && end ? `&end=${encodeURIComponent(end)}` : "";
-  return `/chat?sensor=${encodeURIComponent(sensorId)}&ts=${encodeURIComponent(ts)}${q}`;
+  const text = question ? `&q=${encodeURIComponent(question)}` : "";
+  return `/chat?sensor=${encodeURIComponent(sensorId)}&ts=${encodeURIComponent(ts)}${q}${text}`;
 }
 
 /** What /chat scopes to when opened from an incident: the incident's recording,
@@ -49,6 +58,7 @@ export function incidentChatPrefill(search: string): IncidentChatPrefill | null 
     from,
     to,
     question:
+      p.get("q")?.trim().slice(0, 4000) ||
       `Tell me about the incident on sensor ${sensor} at ${start.toISOString()}${until}. ` +
       `Use the incident from rtvi_vlm_alert get_incidents for sensor ${sensor} and run video understanding from ${from} to ${to}. ` +
       `What happened, which products were involved, and was anything taken without being scanned?`,

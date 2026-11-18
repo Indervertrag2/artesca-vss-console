@@ -60,6 +60,11 @@ export async function register() {
     // events land in this pod's SQLite file; /cameras/sources shows its state.
     const { startSourcePoller } = await import("@/lib/source-poll");
     startSourcePoller(instance);
+    // Multi-camera scenarios: one judgement per till purchase, from the same
+    // SQLite event log; the console pod is a single replica, so it runs once.
+    const { startPurchaseRunner } = await import("@/lib/purchase-runner");
+    const { listSourceEvents } = await import("@/lib/source-events");
+    startPurchaseRunner(instance, (sourceId) => listSourceEvents(sourceId, { limit: 5000 }).events);
   }
 }
 

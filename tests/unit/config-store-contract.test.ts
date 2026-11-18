@@ -241,6 +241,23 @@ for (const backend of backends) {
       expect(got.enabled).toBe(false);
     });
 
+    it("round-trips a multi-camera scenario's cameras, sources, rules and product classes (#59)", async () => {
+      const multi: ScenarioEntry = {
+        ...scenario("sco"),
+        mode: "multi",
+        cameras: [{ id: "overhead-cam", view: "checkout from above" }, { id: "scanner-cam" }],
+        sources: [{ id: "till-1", role: "clock" }, { id: "scale-1", role: "witness" }],
+        rules: { matchToleranceS: 3, windowBeforeS: 30, windowAfterS: 20 },
+        productClasses: [{ pattern: "jelly|gummy", form: "bag", colour: "yellow" }],
+      };
+      await store.writeScenarios(INSTANCE, [multi, scenario("plain")], "me");
+      const got = await store.readScenarios(INSTANCE);
+      const strip = ({ updatedBy: _b, updatedAt: _a, ...rest }: ScenarioEntry & { updatedBy?: string; updatedAt?: string }) => rest;
+      expect(strip(got.find((s) => s.id === "sco")!)).toEqual(multi);
+      // A single-camera scenario carries none of the fields.
+      expect(Object.keys(got.find((s) => s.id === "plain")!)).not.toContain("mode");
+    });
+
     // ── Prompt resolution: the active set wins over the legacy doc ───────────
 
     it("readPrompt prefers the active prompt-set over the legacy prompt", async () => {

@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { existsSync, readFileSync } from "node:fs";
 import { auth } from "@/lib/auth";
-import { CLUSTER } from "@/lib/cluster-refs";
 import { fromAlertBridge } from "@/lib/helpers/incident-wire";
+import { AlertBridgeHttpError, listRealtimeIncidents } from "@/lib/helpers/alert-bridge";
+import { withPurchaseIncidents } from "@/lib/purchase-runner";
+import type { Incident } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +12,6 @@ export const dynamic = "force-dynamic";
 // (vss-alert-bridge) GET /api/v1/realtime/incidents — it's the service that
 // actually produces incidents (into ES) for live RTSP alert rules. The older
 // ALERT_WORKER_URL (vss-video-analytics-api) has no /api/incidents endpoint.
-const ALERT_BRIDGE_URL = CLUSTER.alertBridge.url;
 
 const SYNTHETIC_EVENTS_PATH =
   process.env.SYNTHETIC_EVENTS_PATH ?? "/data/synthetic-events.jsonl";
@@ -36,30 +37,15 @@ export async function GET(req: NextRequest) {
 
 
   try {
-    const resp = await fetch(
-      `${ALERT_BRIDGE_URL}/api/v1/realtime/incidents?limit=${encodeURIComponent(String(safeLimit))}`,
-      {
-        next: { revalidate: 0 },
-        signal: AbortSignal.timeout(5_000),
-      }
-    );
-
-    if (!resp.ok) {
-      return NextResponse.json(
-        { error: `alert-bridge returned HTTP ${resp.status}`, incidents: [] },
-        { status: 502 }
-      );
-    }
-
-    // alert-bridge wraps the list: { status, incidents: [...], count, total }.
-    const data = await resp.json();
-    const list: unknown[] = Array.isArray(data)
-      ? data
-      : Array.isArray(data?.incidents)
-        ? (data.incidents as unknown[])
-        : [];
-    return NextResponse.json({ incidents: list.map(fromAlertBridge) });
+    const list = await listRealtimeIncidents(safeLimit);
+    // Alerts of multi-camera scenario cameras are hints inside a purchase
+    // incident, which is listed instead (purchase-runner.ts).
+    const incidents = await withPurchaseIncidents(list.map(fromAlertBridge) as Incident[], safeLimit);
+    return NextResponse.json({ incidents });
   } catch (err) {
+    if (err instanceof AlertBridgeHttpError) {
+      return NextResponse.json({ error: err.message, incidents: [] }, { status: 502 });
+    }
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       { error: `alert-bridge unreachable: ${msg}`, incidents: [] },

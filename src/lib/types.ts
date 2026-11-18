@@ -2,6 +2,7 @@
 // Data model as defined in docs/console-design.md — verbatim interface definitions.
 
 import type { BucketTotalsState } from "@/lib/storage/bucket-scan";
+import type { ScenarioMulti } from "@/lib/purchase-judge";
 
 export type Health = "ok" | "warn" | "fail" | "unknown";
 
@@ -82,7 +83,7 @@ export interface DemoProfile {
   nimModel: "cosmos-reason2-8b" | "cosmos-reason1-7b" | string;
 }
 
-export interface Scenario {
+export interface Scenario extends ScenarioMulti {
   id: string;
   name: string;
   description?: string;

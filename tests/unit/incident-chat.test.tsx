@@ -63,6 +63,17 @@ describe("incidentChatPrefill", () => {
     expect(incidentChatPrefill("ts=2026-01-02T03:04:05Z")).toBeNull();
     expect(incidentChatPrefill("sensor=camera-1&ts=garbage")).toBeNull();
   });
+
+  it("takes a given first message (a purchase incident's till record) and keeps the recording scope (#59)", () => {
+    const question = "Tell me about purchase 63: scanned Cola & Green Pea; total 5.00?";
+    const href = incidentChatHref("camera-2", "2026-01-02T03:04:05Z", "2026-01-02T03:05:05Z", question);
+    expect(incidentChatPrefill(href.slice(href.indexOf("?")))).toEqual({
+      sensor: "camera-2",
+      question,
+      from: "2026-01-02T03:03:35.000Z",
+      to: "2026-01-02T03:05:35.000Z",
+    });
+  });
 });
 
 describe("/chat from an incident link", () => {

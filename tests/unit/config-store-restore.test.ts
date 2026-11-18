@@ -79,6 +79,11 @@ describe("parseFillSource", () => {
     expect(cam({ recording: { enabled: true, retentionDays: 7, policy: "always", hook: "x" } })).toThrow(/recording/);
     expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], url: "http://x" }] }, "showroom")).toThrow(/scenarios\[0\]/);
     expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], severity: "urgent" }] }, "showroom")).toThrow(/severity/);
+    // A multi-camera scenario restores (#59), but its nested objects are strict too.
+    const multi = { mode: "multi", cameras: [{ id: "cam0", view: "above" }], sources: [{ id: "till-1", role: "clock" }], rules: { matchToleranceS: 3, windowBeforeS: 30, windowAfterS: 20 }, productClasses: [{ pattern: "jelly", form: "bag" }] };
+    expect(parseFillSource({ scenarios: [{ ...SCEN[0], ...multi }] }, "showroom").scenarios[0]).toMatchObject(multi);
+    expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], ...multi, sources: [{ id: "till-1", role: "boss" }] }] }, "showroom")).toThrow(/scenarios\[0\]/);
+    expect(() => parseFillSource({ scenarios: [{ ...SCEN[0], ...multi, rules: { ...multi.rules, url: "x" } }] }, "showroom")).toThrow(/scenarios\[0\]/);
     expect(() => parseFillSource({ promptSets: [{ ...SETS[0], endpoint: "http://x" }] }, "showroom")).toThrow(/promptSets\[0\]/);
     expect(() => parseFillSource({ promptSets: [{ ...SETS[0], text: 42 }] }, "showroom")).toThrow(/text/);
   });

@@ -5,6 +5,9 @@ vi.mock("@/lib/kiosk-server", () => ({ rejectIfKiosk: vi.fn().mockResolvedValue(
 vi.mock("@/lib/helpers/audit", () => ({ auditLog: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/lib/reconcile/context", () => ({ ReconcileContextError: class extends Error {}, makeReconcileContext: vi.fn() }));
 vi.mock("@/lib/reconcile/scenarios", () => ({ reconcileScenarios: vi.fn().mockResolvedValue({ updated: true }) }));
+vi.mock("@/lib/purchase-runner", () => ({
+  purchaseStatus: vi.fn((ids: string[]) => Object.fromEntries(ids.map((id) => [id, { purchaseId: "63", incident: true }]))),
+}));
 
 // Stub modules with import-time side effects so the route imports cleanly.
 vi.mock("@/lib/k8s", () => ({
@@ -55,13 +58,49 @@ describe("scenarios route (k8s)", () => {
   it("GET returns Firestore scenarios mapped to the client shape", async () => {
     vi.mocked(makeReconcileContext).mockResolvedValue({
       instance: "inst-1", adapter: {} as never, refs: {} as never,
-      store: { readScenarios: vi.fn().mockResolvedValue([{ id: "fall", name: "Fall", severity: "high", channels: ["ui"], sensor_filter: "*", keywords: ["fall"], enabled: true }]) } as never,
+      store: {
+        readScenarios: vi.fn().mockResolvedValue([{ id: "fall", name: "Fall", severity: "high", channels: ["ui"], sensor_filter: "*", keywords: ["fall"], enabled: true }]),
+        readCameras: vi.fn().mockResolvedValue([]),
+        readSources: vi.fn().mockResolvedValue([]),
+      } as never,
     } as never);
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.scenarios[0].id).toBe("fall");
     expect(body.scenarios[0].sensorFilter).toBe("*");
+    expect(body.scenarios[0]).not.toHaveProperty("mode");
+  });
+
+  it("GET and PATCH carry a multi-camera scenario's fields, with its status and the pickable ids (#59)", async () => {
+    const multi = {
+      mode: "multi",
+      cameras: [{ id: "overhead-cam", view: "above" }, { id: "scanner-cam" }],
+      sources: [{ id: "till-1", role: "clock" }],
+      rules: { matchToleranceS: 3, windowBeforeS: 30, windowAfterS: 20 },
+    };
+    const writeScenarios = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(makeReconcileContext).mockResolvedValue({
+      instance: "inst-1", adapter: {} as never, refs: { scenarios: {} } as never,
+      store: {
+        readScenarios: vi.fn().mockResolvedValue([{ id: "sco", name: "SCO", severity: "high", channels: ["ui"], sensor_filter: "*", keywords: [], enabled: true, ...multi }]),
+        readCameras: vi.fn().mockResolvedValue([{ id: "overhead-cam" }, { id: "scanner-cam" }]),
+        readSources: vi.fn().mockResolvedValue([{ id: "till-1" }]),
+        writeScenarios,
+      } as never,
+    } as never);
+    const body = await (await GET()).json();
+    expect(body.scenarios[0]).toMatchObject(multi);
+    expect(body.cameraIds).toEqual(["overhead-cam", "scanner-cam"]);
+    expect(body.sourceIds).toEqual(["till-1"]);
+    expect(body.purchaseStatus).toEqual({ sco: { purchaseId: "63", incident: true } });
+
+    const res = await PATCH(patchReq({ scenarios: [{ ...SCEN, ...multi }, { ...SCEN, id: "plain", cameras: [{ id: "x" }] }] }));
+    expect(res.status).toBe(200);
+    const written = writeScenarios.mock.calls[0][1] as Record<string, unknown>[];
+    expect(written[0]).toMatchObject(multi);
+    // Without mode "multi" the multi fields are not stored.
+    expect(written[1]).not.toHaveProperty("cameras");
   });
 
   it("PATCH writes Firestore then applies write-through", async () => {

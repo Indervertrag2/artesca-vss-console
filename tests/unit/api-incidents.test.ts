@@ -15,6 +15,11 @@ vi.mock("@/lib/cluster-refs", () => ({
   },
 }));
 
+// The purchase merge (SQLite + config store) has its own suite: purchase-runner.test.ts.
+vi.mock("@/lib/purchase-runner", () => ({
+  withPurchaseIncidents: vi.fn(async (bridge: unknown[]) => bridge),
+}));
+
 // stub fs so tests don't touch disk
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(false),

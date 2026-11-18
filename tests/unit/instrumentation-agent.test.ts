@@ -5,6 +5,10 @@ const startReconcileLoop = vi.fn(async () => {});
 vi.mock("@/lib/reconcile-agent", () => ({ startReconcileLoop }));
 // The source poller would start a real 2.5 s interval against the config store.
 vi.mock("@/lib/source-poll", () => ({ startSourcePoller: vi.fn() }));
+// So would the purchase runner (10 s), reading the SQLite event log.
+const startPurchaseRunner = vi.fn();
+vi.mock("@/lib/purchase-runner", () => ({ startPurchaseRunner }));
+vi.mock("@/lib/source-events", () => ({ listSourceEvents: vi.fn() }));
 
 describe("instrumentation register() — agent mode", () => {
   const OLD = { ...process.env };
@@ -32,5 +36,7 @@ describe("instrumentation register() — agent mode", () => {
     const { register } = await import("@/instrumentation");
     await register();
     expect(startReconcileLoop).toHaveBeenCalledTimes(1);
+    // The purchase runner runs here, in the console pod that owns the SQLite file (#59).
+    expect(startPurchaseRunner).toHaveBeenCalledWith("inst-1", expect.any(Function));
   });
 });

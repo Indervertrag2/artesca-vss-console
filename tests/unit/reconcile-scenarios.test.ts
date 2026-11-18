@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcileScenarios } from "@/lib/reconcile/scenarios";
+import { reconcileScenarios, serializeScenarios } from "@/lib/reconcile/scenarios";
 import type { ClusterAdapter } from "@/lib/reconcile/cluster-adapter";
 import type { ScenarioEntry } from "@/lib/config-store/types";
 
@@ -52,5 +52,13 @@ describe("reconcileScenarios", () => {
     const r = await reconcileScenarios([sc("a")], adapter, REFS, serialize);
     expect(r.updated).toBe(false);
     expect(r.error).toContain("cm read failed");
+  });
+});
+
+describe("serializeScenarios", () => {
+  it("leaves multi-camera scenarios out of the alert worker's ConfigMap (#59)", () => {
+    const multi: ScenarioEntry = { ...sc("sco"), mode: "multi", cameras: [{ id: "scanner-cam" }] };
+    expect(serializeScenarios([sc("a"), multi])).toBe(serializeScenarios([sc("a")]));
+    expect(serializeScenarios([sc("a")])).toContain("id: a");
   });
 });

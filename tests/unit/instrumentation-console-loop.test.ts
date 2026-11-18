@@ -5,6 +5,9 @@ const startReconcileLoop = vi.fn().mockResolvedValue(undefined);
 vi.mock("@/lib/reconcile-agent", () => ({ startReconcileLoop }));
 // The source poller would start a real 2.5 s interval against the config store.
 vi.mock("@/lib/source-poll", () => ({ startSourcePoller: vi.fn() }));
+// So would the purchase runner (10 s), reading the SQLite event log.
+vi.mock("@/lib/purchase-runner", () => ({ startPurchaseRunner: vi.fn() }));
+vi.mock("@/lib/source-events", () => ({ listSourceEvents: vi.fn() }));
 vi.mock("@/lib/deprecation-filter", () => ({ filterKnownUpstreamWarnings: vi.fn() }));
 vi.mock("@/lib/logger", () => ({ createLogger: () => ({ info: vi.fn(), warn: vi.fn() }) }));
 
