@@ -48,7 +48,8 @@ const EXPLICIT_PREFIX = /^\s*(?:search|find)\s*:\s*/i;
 // ordinary agent questions ("how many cameras are live?", "what happened on
 // dock-1?") are NOT hijacked — only clear "search the footage" asks route here.
 const NATURAL_PATTERNS: RegExp[] = [
-  /\b(?:find|show me|search for|look for|pull up|surface)\s+(?:all|every|any)\b/i,
+  // A footage noun must follow the quantifier: "show me all cameras" is for the agent.
+  /\b(?:find|show me|search for|look for|pull up|surface)\s+(?:all|every|any)\b.*\b(?:clips?|footage|incidents?|recordings?|events?)\b/i,
   /\bsearch\s+(?:the\s+)?(?:footage|clips?|incidents?|recordings?|archive|captions?|history|video)\b/i,
   /\b(?:any|all|every)\s+(?:clips?|incidents?|footage|recordings?|events?)\s+(?:of|with|showing|where|involving|about)\b/i,
 ];
