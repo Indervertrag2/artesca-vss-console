@@ -321,20 +321,19 @@ export function ClipPlayer({ src, seekOffset, clipStatus, fallbackMeta }: ClipPl
     return <UnavailableFallback meta={fallbackMeta} technical={serverDiag ?? undefined} />;
   }
 
-  // ── Render: HLS error ─────────────────────────────────────────────────────
-  if (hlsError) {
-    if (isTransient) {
-      // Clip is still materialising or early retry — show spinner.
-      return <MaterialisingFallback />;
-    }
-    // Exhausted retries → data-only fallback. Prefer the backend's diagnostic
-    // (VST reason) over the generic HLS error string.
+  // ── Render: HLS error, retries exhausted ──────────────────────────────────
+  // Data-only fallback. Prefer the backend's diagnostic (VST reason) over the
+  // generic HLS error string.
+  if (hlsError && !isTransient) {
     return (
       <UnavailableFallback meta={fallbackMeta} technical={serverDiag ?? hlsError} />
     );
   }
 
-  // ── Render: normal player ─────────────────────────────────────────────────
+  // ── Render: player ────────────────────────────────────────────────────────
+  // The <video> stays mounted through a transient error, with the spinner over
+  // it: a retry attaches hls.js to that element, and while the spinner took
+  // its place a retry found no element and never reloaded the clip.
   return (
     <div className="relative aspect-video w-full overflow-hidden rounded bg-black">
       <video
@@ -345,10 +344,14 @@ export function ClipPlayer({ src, seekOffset, clipStatus, fallbackMeta }: ClipPl
         muted
       />
       {!ready && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <span className="text-xs text-muted-foreground animate-pulse">
-            Loading clip…
-          </span>
+        <div className="absolute inset-0 flex items-center justify-center p-4">
+          {hlsError || recording || retryCount > 0 ? (
+            <MaterialisingFallback />
+          ) : (
+            <span className="text-xs text-muted-foreground animate-pulse">
+              Loading clip…
+            </span>
+          )}
         </div>
       )}
       <div className="absolute bottom-1 right-2 text-[10px] text-white/40 pointer-events-none">
