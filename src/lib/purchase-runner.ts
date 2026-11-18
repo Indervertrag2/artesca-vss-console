@@ -257,9 +257,13 @@ function judgeInBackground(
   now: number,
   retryMs: number,
   getHints: RecordingHints,
-): void {
+): boolean {
   const key = [s.id, clock, p.id, p.closedAt].join("|");
-  if ((shared.recordingJobs.get(key) ?? 0) > now) return;
+  if ((shared.recordingJobs.get(key) ?? 0) > now) return false;
+  // One purchase at a time for the whole process. Each one downloads and re-encodes
+  // a recording per camera: a backlog of 18 purchases started together took every
+  // core of the console and its clips stopped loading.
+  if ([...shared.recordingJobs.values()].includes(Infinity)) return false;
   shared.recordingJobs.set(key, Infinity);
   void (async () => {
     try {
@@ -274,6 +278,7 @@ function judgeInBackground(
       noteError(s.id, err);
     }
   })();
+  return true;
 }
 
 export interface PurchaseRow {
@@ -419,12 +424,14 @@ export async function evaluateDuePurchases(deps: RunnerDeps): Promise<PurchaseVe
         );
       });
       if (recording) {
-        for (const p of due) {
+        // Newest first, and only one is started: the purchase that just ended is not
+        // kept waiting by a backlog, which is worked off while nothing newer is due.
+        for (const p of [...due].sort((a, b) => Date.parse(b.closedAt) - Date.parse(a.closedAt))) {
           // A failed purchase waits as long again as it has been due, so the gaps double:
           // a recording that stays short is not downloaded and re-encoded on every pass.
           const overdueMs = now - (Date.parse(p.closedAt) + rules.windowAfterS * 1000 + delayMs);
           const retryMs = Math.max(RECORDING_RETRY_MS, overdueMs);
-          judgeInBackground(s, clock, p, finished, now, retryMs, deps.recordingHints ?? recordingHints);
+          if (judgeInBackground(s, clock, p, finished, now, retryMs, deps.recordingHints ?? recordingHints)) break;
         }
         // A purchase still to be judged keeps the scenario's error until it is judged or given up.
         if (due.length) continue;

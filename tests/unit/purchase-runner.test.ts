@@ -328,3 +328,26 @@ describe("evidence from the recording", () => {
     ).rejects.toThrow(/^VST has no recording/);
   });
 });
+
+describe("evidence from the recording: one purchase at a time", () => {
+  it("works on a single recording for the whole process, and starts the next when it is done", async () => {
+    store.scenarios = [scenario("q1", { evidence: "recording" }), scenario("q2", { evidence: "recording" })];
+    const evidence: RecordingEvidence = { hints: [], chunksAsked: { "overhead-cam": 10, "scanner-cam": 10 } };
+    const finish: ((e: RecordingEvidence) => void)[] = [];
+    const hints = vi.fn(() => new Promise<RecordingEvidence>((resolve) => finish.push(resolve)));
+    const run = (now: number) => evaluateDuePurchases({ ...deps(now), recordingHints: hints });
+
+    // Both scenarios have the purchase due; a backlog started together starves the console.
+    await run(at("17:44:53Z"));
+    await run(at("17:45:03Z"));
+    expect(hints).toHaveBeenCalledTimes(1);
+
+    finish[0](evidence);
+    await vi.waitFor(() => expect(Object.keys(purchaseStatus(["q1", "q2"]))).toHaveLength(1));
+    await run(at("17:45:13Z"));
+    expect(hints).toHaveBeenCalledTimes(2);
+
+    finish[1](evidence);
+    await vi.waitFor(() => expect(Object.keys(purchaseStatus(["q1", "q2"]))).toHaveLength(2));
+  });
+});
