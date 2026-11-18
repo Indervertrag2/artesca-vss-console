@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
@@ -95,6 +95,9 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
   const [copied, setCopied] = useState(false);
   const [report, setReport] = useState<ReportState>({ phase: "idle" });
   const { toast } = useToast();
+  // The incident the dialog last showed. A Generate Report response for any
+  // other incident is dropped: one instance serves every incident.
+  const shownKey = useRef("");
 
   const sensorId = incident?.sensorId;
   const ts = incident?.ts;
@@ -108,6 +111,7 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
     // resets to idle the next time it opens on a (possibly different)
     // incident, and this component renders null while closed regardless.
     if (!sensorId || !ts) return;
+    shownKey.current = `${sensorId}::${ts}`;
     let alive = true;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing any stale report before probing the new incident
     setReport({ phase: "idle" });
@@ -144,6 +148,7 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
   };
 
   const generateReport = async (force: boolean) => {
+    const key = `${incident.sensorId}::${incident.ts}`;
     setReport({ phase: "loading" });
     try {
       const res = await fetch("/api/incidents/report", {
@@ -157,6 +162,7 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
         }),
       });
       const j = await res.json().catch(() => null);
+      if (shownKey.current !== key) return;
       const parsed = asReportSuccess(j);
       if (!res.ok || !parsed) {
         const message =
@@ -168,6 +174,7 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
       setReport({ phase: "ready", ...parsed });
       toast({ title: "Incident report generated" });
     } catch (e) {
+      if (shownKey.current !== key) return;
       const message = (e as Error).message || "Report generation failed";
       setReport({ phase: "error", message });
       toast({ title: "Failed to generate report", description: message, variant: "destructive" });
