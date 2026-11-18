@@ -217,8 +217,12 @@ export function IncidentDetail({ incident, onClose }: IncidentDetailProps) {
         </DialogHeader>
 
         {/* When the payload is expanded, split into two columns: incident
-            details on the left, the full raw payload on the right. */}
-        <div className={rawExpanded ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]" : "space-y-4"}>
+            details on the left, the full raw payload on the right.
+            min-w-0: this is a grid item of DialogContent. Monaco sets a pixel
+            width on itself, and with min-width: auto a collapse during the
+            max-width transition let it hold the column (and the clip player)
+            wider than the dialog. */}
+        <div className={`min-w-0 ${rawExpanded ? "grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]" : "space-y-4"}`}>
           <div className="space-y-4">
             {/* Metadata */}
             <div className="grid grid-cols-2 gap-3 text-sm">
