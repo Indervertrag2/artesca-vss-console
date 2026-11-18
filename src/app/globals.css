@@ -52,6 +52,39 @@
   }
 }
 
+/* The page's and the sidebar's scrollbars stay invisible until the pointer is
+ * over one or its thumb is being dragged (useScrollbarAutohide sets
+ * data-scrollbar-visible). Hidden is the default here, so a reload never
+ * flashes a scrollbar before hydration. The track keeps its width either way,
+ * so showing it never shifts the layout. Touch devices keep their native
+ * overlay indicators. */
+@media (hover: hover) and (pointer: fine) {
+  html,
+  .scroll-autohide {
+    scrollbar-color: transparent transparent;
+  }
+  html[data-scrollbar-visible],
+  .scroll-autohide[data-scrollbar-visible] {
+    scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 55%, transparent) transparent;
+  }
+  /* Safari has no scrollbar-color. Chromium ignores these once scrollbar-color is set. */
+  html::-webkit-scrollbar,
+  .scroll-autohide::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+    background: transparent;
+  }
+  html::-webkit-scrollbar-thumb,
+  .scroll-autohide::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: transparent;
+  }
+  html[data-scrollbar-visible]::-webkit-scrollbar-thumb,
+  .scroll-autohide[data-scrollbar-visible]::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-muted-foreground) 55%, transparent);
+  }
+}
+
 /* Bare HSL-triplet aliases for the brand tokens. Chart/SVG/edge code (recharts,
  * React Flow) consumes colors as `hsl(var(--token))` / `hsl(var(--token) / a)`
  * strings in JS — those need the raw H S% L% triplet, which @theme's hex

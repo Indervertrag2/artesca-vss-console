@@ -6,6 +6,7 @@ import { AuthProvider } from "@/components/AuthProvider";
 import { QueryProvider } from "@/components/QueryProvider";
 import { KioskProvider } from "@/components/KioskProvider";
 import { BoxModeProvider } from "@/components/BoxModeProvider";
+import { PageScrollbarAutohide } from "@/components/PageScrollbarAutohide";
 import { isKioskFromHeaders } from "@/lib/kiosk";
 import { CLUSTER } from "@/lib/cluster-refs";
 
@@ -44,6 +45,7 @@ export default async function RootLayout({
   return (
     <html lang="en" className={`${display.variable} ${sans.variable}`}>
       <body>
+        <PageScrollbarAutohide />
         <AuthProvider>
           <QueryProvider>
             <KioskProvider initialKiosk={kiosk}>
