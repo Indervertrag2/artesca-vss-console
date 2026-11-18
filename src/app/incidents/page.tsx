@@ -65,6 +65,8 @@ const FILTERS_LS_KEY = "console:incidents:filters:v1";
 const VIEW_LS_KEY = "console:incidents:view:v1";
 const TIME_WINDOW_VALUES: TimeWindow[] = ["15m", "1h", "24h", "all"];
 const SEVERITY_VALUES: Incident["severity"][] = ["low", "medium", "high"];
+/** The kiosk wall has no filter controls: it shows everything loaded. */
+const KIOSK_FILTERS: FilterState = { ...DEFAULT_FILTERS, timeWindow: "all" };
 
 type ViewMode = "timeline" | "grid";
 
@@ -269,8 +271,8 @@ function IncidentsPageContent() {
   });
 
   const filtered = useMemo(
-    () => filterIncidents(incidents, filters),
-    [incidents, filters]
+    () => filterIncidents(incidents, isKiosk ? KIOSK_FILTERS : filters),
+    [incidents, filters, isKiosk]
   );
 
   // Distinct sensors seen in the loaded incidents — populates the Sensor dropdown.
