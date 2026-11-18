@@ -400,3 +400,19 @@ describe("rule 2 with overlapping chunks", () => {
     expect(v.incident).toBe(true);
   });
 });
+
+describe("window counted from the start of the purchase", () => {
+  const rules = { ...DEFAULT_RULES, windowBeforeS: 10, windowAfterS: 10, windowFrom: "purchase-start" as const };
+
+  it("opens before the till's start of the purchase when that start belongs to the scans", () => {
+    const p = only(till(63, "17:43:18Z", [["17:43:21Z", ITEM.cola], ["17:43:26Z", ITEM.pea]], "17:43:33Z"));
+    expect(purchaseWindow(p, rules)).toEqual({ start: `${D}17:43:08.000Z`, end: `${D}17:43:43.000Z` });
+    // Without the setting it counts from the first scan, as before.
+    expect(purchaseWindow(p, { ...DEFAULT_RULES, windowBeforeS: 10, windowAfterS: 10 })?.start).toBe(`${D}17:43:11.000Z`);
+  });
+
+  it("falls back to the first scan when the purchase was opened long before it", () => {
+    const p = only(till(62, "17:06:00Z", [["17:37:40Z", ITEM.apple]], "17:37:49Z"));
+    expect(purchaseWindow(p, rules)?.start).toBe(`${D}17:37:30.000Z`);
+  });
+});

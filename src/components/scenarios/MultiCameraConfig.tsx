@@ -38,9 +38,9 @@ interface Props {
   status?: PurchaseStatusView;
 }
 
-const RULE_FIELDS: { key: keyof PurchaseRules; label: string; title: string }[] = [
+const RULE_FIELDS: { key: "matchToleranceS" | "windowBeforeS" | "windowAfterS"; label: string; title: string }[] = [
   { key: "matchToleranceS", label: "Match tolerance (s)", title: "A hint is explained by a scan of a matching item this close to its chunk" },
-  { key: "windowBeforeS", label: "Window before first scan (s)", title: "Seconds before the first scan of the last block of scans" },
+  { key: "windowBeforeS", label: "Window before (s)", title: "Seconds the window opens before the first scan, or before the start of the purchase (see Window starts)" },
   { key: "windowAfterS", label: "Window after payment (s)", title: "Seconds after the purchase ends" },
 ];
 
@@ -282,6 +282,21 @@ export function MultiCameraConfig({ scenario, onChange, cameraIds, sourceIds, st
             />
           </label>
         ))}
+        <label className="flex items-center gap-2" title="What the window counts back from. A till can open a purchase long before the first scan; then the first scan is used either way.">
+          <span>Window starts</span>
+          <select
+            className={select}
+            aria-label="Window starts"
+            value={rules.windowFrom ?? "first-scan"}
+            onChange={(e) => {
+              const { windowFrom: _dropped, ...rest } = rules;
+              set({ rules: e.target.value === "purchase-start" ? { ...rest, windowFrom: "purchase-start" } : rest });
+            }}
+          >
+            <option value="first-scan">before the first scan</option>
+            <option value="purchase-start">before the start of the purchase</option>
+          </select>
+        </label>
       </div>
 
       <div className="space-y-1.5">

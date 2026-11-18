@@ -23,6 +23,8 @@ export const PurchaseRulesSchema = z
     matchToleranceS: z.number().min(0).max(60),
     windowBeforeS: z.number().min(0).max(600),
     windowAfterS: z.number().min(0).max(600),
+    /** What `windowBeforeS` counts back from; absent = the first scan. */
+    windowFrom: z.enum(["first-scan", "purchase-start"]).optional(),
   })
   .strict();
 export type PurchaseRules = z.infer<typeof PurchaseRulesSchema>;
@@ -297,7 +299,11 @@ export function purchasesFromEvents(events: TillEvent[]): Purchase[] {
  * The time looked at for one purchase: from the first scan of the last block of
  * scans (gaps of at most 60 s) minus `windowBeforeS`, to the end of the purchase
  * plus `windowAfterS`. A session can stay open for half an hour before anyone
- * scans, so it is not the session start. Null when nothing was scanned.
+ * scans, so it is not the session start. With `windowFrom: "purchase-start"` it
+ * counts back from the till's start of the purchase instead, when that start
+ * belongs to the same block (at most 60 s before its first scan): an item put
+ * aside just before the first scan then lies well inside the window.
+ * Null when nothing was scanned.
  */
 export function purchaseWindow(p: Purchase, rules: PurchaseRules): { start: string; end: string } | null {
   const times = p.scans
@@ -307,7 +313,10 @@ export function purchaseWindow(p: Purchase, rules: PurchaseRules): { start: stri
   if (!times.length) return null;
   let first = times[times.length - 1];
   for (let i = times.length - 1; i > 0 && times[i] - times[i - 1] <= SCAN_BLOCK_GAP_S * 1000; i--) first = times[i - 1];
-  return { start: iso(first - rules.windowBeforeS * 1000), end: iso(ms(p.closedAt) + rules.windowAfterS * 1000) };
+  const begun = ms(p.startedAt);
+  const from =
+    rules.windowFrom === "purchase-start" && begun <= first && first - begun <= SCAN_BLOCK_GAP_S * 1000 ? begun : first;
+  return { start: iso(from - rules.windowBeforeS * 1000), end: iso(ms(p.closedAt) + rules.windowAfterS * 1000) };
 }
 
 // ─── Words ────────────────────────────────────────────────────────────────────
