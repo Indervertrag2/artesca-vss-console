@@ -134,6 +134,28 @@ describe("kafka-sse", () => {
     expect(getActiveConsumerCount()).toBe(0);
   });
 
+  it("disconnects and frees the slot when subscribe() throws", async () => {
+    mockConsumer.subscribe.mockRejectedValueOnce(new Error("subscribe failed"));
+    const { startKafkaSseConsumer, getActiveConsumerCount } = await import("@/lib/streams/kafka-sse");
+    const ctrl = new AbortController();
+
+    await expect(
+      startKafkaSseConsumer({ topic: "incidents", signal: ctrl.signal, onMessage: () => undefined })
+    ).rejects.toThrow(/subscribe failed/);
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(getActiveConsumerCount()).toBe(0);
+  });
+
+  it("disconnects a consumer whose client left during setup", async () => {
+    const ctrl = new AbortController();
+    mockConsumer.subscribe.mockImplementationOnce(async () => { ctrl.abort(); });
+    const { startKafkaSseConsumer, getActiveConsumerCount } = await import("@/lib/streams/kafka-sse");
+
+    await startKafkaSseConsumer({ topic: "incidents", signal: ctrl.signal, onMessage: () => undefined });
+    expect(mockConsumer.disconnect).toHaveBeenCalledTimes(1);
+    expect(getActiveConsumerCount()).toBe(0);
+  });
+
   it("aborts trigger disconnect and remove the entry from the active set", async () => {
     const { startKafkaSseConsumer, getActiveConsumerCount } = await import("@/lib/streams/kafka-sse");
     const ctrl = new AbortController();

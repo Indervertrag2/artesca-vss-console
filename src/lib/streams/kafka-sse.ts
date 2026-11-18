@@ -111,64 +111,69 @@ export async function startKafkaSseConsumer(
   const entry: ActiveEntry = { consumer, topic: opts.topic, groupId, disconnected: false };
   activeConsumers.add(entry);
 
-  try {
-    await consumer.connect();
-  } catch (err) {
-    activeConsumers.delete(entry);
-    throw err;
-  }
-
-  consumer.on(consumer.events.CRASH, (event) => {
-    log.error("consumer crash", {
-      err: event.payload.error,
-      groupId: event.payload.groupId,
-      restart: event.payload.restart,
-    });
-  });
-
   // "replay N" requires reading from earliest so old messages are visible;
   // fromOffset is ignored when replayCount > 0.
   const replayTarget = opts.replayCount ?? 0;
   const fromBeginning = replayTarget > 0 ? true : opts.fromOffset !== "latest";
 
-  await consumer.subscribe({ topic: opts.topic, fromBeginning });
-
   let replayed = 0;
   let replayPhase = replayTarget > 0;
 
-  await consumer.run({
-    eachMessage: async ({ message }) => {
-      if (opts.signal.aborted) return;
+  // Any setup failure frees the slot, or MAX_ACTIVE_CONSUMERS leaks entries
+  // until every request answers the capacity error.
+  try {
+    await consumer.connect();
 
-      const raw = message.value?.toString("utf8");
-      if (!raw) return;
+    consumer.on(consumer.events.CRASH, (event) => {
+      log.error("consumer crash", {
+        err: event.payload.error,
+        groupId: event.payload.groupId,
+        restart: event.payload.restart,
+      });
+    });
 
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        parsed = { raw };
-      }
+    await consumer.subscribe({ topic: opts.topic, fromBeginning });
 
-      if (replayPhase) {
-        if (replayed < replayTarget) {
-          replayed++;
-          opts.onMessage(parsed);
-          if (replayed >= replayTarget) {
-            replayPhase = false;
-          }
+    await consumer.run({
+      eachMessage: async ({ message }) => {
+        if (opts.signal.aborted) return;
+
+        const raw = message.value?.toString("utf8");
+        if (!raw) return;
+
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          parsed = { raw };
         }
-      } else {
-        opts.onMessage(parsed);
-      }
-    },
-  });
+
+        if (replayPhase) {
+          if (replayed < replayTarget) {
+            replayed++;
+            opts.onMessage(parsed);
+            if (replayed >= replayTarget) {
+              replayPhase = false;
+            }
+          }
+        } else {
+          opts.onMessage(parsed);
+        }
+      },
+    });
+  } catch (err) {
+    void disconnectEntry(entry);
+    throw err;
+  }
 
   const disconnect = () => {
     void disconnectEntry(entry);
   };
 
-  opts.signal.addEventListener("abort", disconnect, { once: true });
+  // A listener added to an already aborted signal never fires: a client that
+  // left during setup is disconnected here.
+  if (opts.signal.aborted) disconnect();
+  else opts.signal.addEventListener("abort", disconnect, { once: true });
 
   return disconnect;
 }

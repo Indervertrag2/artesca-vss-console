@@ -71,6 +71,9 @@ export function createSseResponse<T>(
 
       try {
         cleanup = await onStart(write);
+        // A client that left while onStart ran fired stop() before there was
+        // a cleanup to call; call it now.
+        if (signal.aborted) stop();
       } catch (err) {
         // Emit error event then close.
         if (!signal.aborted) {

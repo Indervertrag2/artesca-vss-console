@@ -201,7 +201,25 @@ describe("createSseResponse", () => {
     expect(clearIntervalSpy).toHaveBeenCalled();
   });
 
-  // ── 6. Heartbeat after abort is swallowed (no throw) ─────────────────────
+  // ── 6. Abort while onStart is still running ──────────────────────────────
+
+  it("calls the cleanup onStart returns after the client left during onStart", async () => {
+    const ctrl = new AbortController();
+    const cleanup = vi.fn();
+    let finishStart!: () => void;
+
+    createSseResponse(ctrl.signal, async () => {
+      await new Promise<void>((resolve) => { finishStart = resolve; });
+      return cleanup;
+    });
+    await Promise.resolve();
+
+    ctrl.abort();
+    finishStart();
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledTimes(1));
+  });
+
+  // ── 7. Heartbeat after abort is swallowed (no throw) ─────────────────────
 
   it("heartbeat encode after abort does not throw", async () => {
     const ctrl = new AbortController();
