@@ -4,6 +4,7 @@ import { createLogger } from "@/lib/logger";
 import { listRealtimeIncidents, listRealtimeIncidentsBetween } from "@/lib/helpers/alert-bridge";
 import { fromAlertBridge } from "@/lib/helpers/incident-wire";
 import {
+  bookedCount,
   DEFAULT_RULES,
   EVALUATION_DELAY_S,
   judgePurchase,
@@ -196,13 +197,14 @@ export function clockOf(s: ScenarioEntry): string {
   return clock;
 }
 
-const judgeConfig = (s: ScenarioEntry, clock: string): JudgeConfig => ({
+const judgeConfig = (s: ScenarioEntry, clock: string, neighbours: Purchase[]): JudgeConfig => ({
   scenarioId: s.id,
   scenarioName: s.name,
   sourceId: clock,
   cameras: s.cameras ?? [],
   rules: s.rules ?? DEFAULT_RULES,
   ...(s.productClasses ? { productClasses: s.productClasses } : {}),
+  neighbours,
 });
 
 export interface PurchaseRow {
@@ -242,7 +244,7 @@ export async function scenarioPurchases(
         purchaseId: p.id,
         closedAt: p.closedAt,
         status: p.status,
-        scans: p.scans.filter((x) => !x.voided).length,
+        scans: bookedCount(p.scans),
         ...(p.totalCents !== undefined ? { totalCents: p.totalCents } : {}),
         ...(row
           ? {
@@ -272,7 +274,8 @@ export async function reevaluatePurchase(
   now = new Date(),
 ): Promise<PurchaseVerdict | null> {
   const clock = clockOf(s);
-  const p = purchasesFromEvents(await deps.readTillEvents(clock))
+  const finished = purchasesFromEvents(await deps.readTillEvents(clock));
+  const p = finished
     .filter((x) => x.id === purchaseId)
     .sort((a, b) => Date.parse(b.closedAt) - Date.parse(a.closedAt))[0];
   if (!p) return null;
@@ -284,7 +287,7 @@ export async function reevaluatePurchase(
         new Date(Date.parse(w.end) + 60_000).toISOString(),
       )
     : [];
-  const v = judgePurchase(p, hints, judgeConfig(s, clock));
+  const v = judgePurchase(p, hints, judgeConfig(s, clock, finished));
   saveVerdict(v, now, true);
   log.info(`re-evaluated purchase ${p.id} of ${clock} for ${s.id}: ${v.incident ? "incident" : "no incident"}`);
   return v;
@@ -313,7 +316,8 @@ export async function evaluateDuePurchases(deps: RunnerDeps): Promise<PurchaseVe
       const clock = clockOf(s);
       const rules = s.rules ?? DEFAULT_RULES;
       const events = (await deps.readTillEvents(clock)).filter((e) => Date.parse(e.ts ?? "") >= now - EVENTS_LOOKBACK_MS);
-      const due = purchasesFromEvents(events).filter((p) => {
+      const finished = purchasesFromEvents(events);
+      const due = finished.filter((p) => {
         const closed = Date.parse(p.closedAt);
         return (
           closed >= now - DUE_LOOKBACK_MS &&
@@ -325,7 +329,7 @@ export async function evaluateDuePurchases(deps: RunnerDeps): Promise<PurchaseVe
         hints ??= deps.fetchHints();
         const all = await hints;
         for (const p of due) {
-          const v = judgePurchase(p, all, judgeConfig(s, clock));
+          const v = judgePurchase(p, all, judgeConfig(s, clock, finished));
           if (saveVerdict(v, new Date(now))) {
             done.push(v);
             log.info(`judged purchase ${p.id} of ${clock} for ${s.id}: ${v.incident ? "incident" : "no incident"}`);

@@ -333,7 +333,15 @@ export interface JudgeConfig {
   cameras: ScenarioCamera[];
   rules?: PurchaseRules;
   productClasses?: ProductClass[];
+  /** The till's other finished purchases. Windows of back-to-back purchases overlap:
+   *  the customer before is still carrying paid goods away when the next window
+   *  opens, so a hint a neighbour's till record explains does not count here. */
+  neighbours?: Purchase[];
 }
+
+/** Items booked net of voids: a void row takes one scan back. */
+export const bookedCount = (scans: { voided: boolean }[]) =>
+  Math.max(0, scans.length - 2 * scans.filter((s) => s.voided).length);
 
 export const clock = (t: string) => `${iso(ms(t)).slice(11, 19)} UTC`;
 export const money = (cents: number | undefined) => (cents === undefined ? "unknown" : (cents / 100).toFixed(2));
@@ -345,7 +353,8 @@ const short = (s: string, n = 120) => (s.length > n ? `${s.slice(0, n - 1)}…` 
  * the scenario does not name are ignored; every other hint either is explained by
  * the till (rule 1: an item of a matching class was scanned within
  * `matchToleranceS` of the hint's chunk; rule 2: after payment, a paid item of a
- * matching class is being carried away) or remains. Any remaining hint makes the
+ * matching class is being carried away) or remains. A neighbouring purchase's till
+ * record explains a hint by the same two rules. Any remaining hint makes the
  * purchase one incident, high because the till and at least one camera agree that
  * something went past the till. No cooldown: every purchase is judged on its own.
  */
@@ -353,11 +362,62 @@ export function judgePurchase(p: Purchase, hints: Hint[], cfg: JudgeConfig): Pur
   const rules = cfg.rules ?? DEFAULT_RULES;
   const classes = cfg.productClasses ?? DEFAULT_PRODUCT_CLASSES;
   const window = purchaseWindow(p, rules);
-  const scans = p.scans.map((s) => ({ ...s, ...classify(s.name, classes) }));
-  const paid = p.items.map((i) => ({ name: i.name, ...classify(i.name, classes) }));
-  const cameraIds = new Set(cfg.cameras.map((c) => c.id));
   const tol = rules.matchToleranceS * 1000;
   const closedAt = ms(p.closedAt);
+  /** What one purchase's till record can explain: its scans, its paid basket, and until when. */
+  const record = (x: Purchase, other: boolean) => ({
+    id: x.id,
+    other,
+    scans: x.scans.map((s) => ({ ...s, ...classify(s.name, classes) })),
+    paid: x.items.map((i) => ({ name: i.name, ...classify(i.name, classes) })),
+    closedAt: ms(x.closedAt),
+    end: ms(x.closedAt) + rules.windowAfterS * 1000,
+  });
+  const own = record(p, false);
+  const scans = own.scans;
+  const cameraIds = new Set(cfg.cameras.map((c) => c.id));
+  // Neighbours whose time at the till touches this window, the nearest first.
+  const neighbours = !window
+    ? []
+    : (cfg.neighbours ?? [])
+        .filter((o) => !(o.id === p.id && o.closedAt === p.closedAt))
+        .filter((o) => {
+          const w = purchaseWindow(o, rules);
+          return !!w && ms(w.end) + tol >= ms(window.start) && ms(w.start) - tol <= ms(window.end);
+        })
+        .map((o) => record(o, true))
+        .sort((a, b) => Math.abs(a.closedAt - closedAt) - Math.abs(b.closedAt - closedAt));
+
+  /** Rule 1 or rule 2 of one till record for one hint, or nothing. */
+  const explain = (
+    rec: ReturnType<typeof record>,
+    seen: { forms: ProductForm[]; colours: string[] },
+    n: string,
+    s: number,
+    e: number,
+  ): { outcome: HintOutcome; reason: string } | null => {
+    const scanned = rec.scans.find((sc) => {
+      const t = ms(sc.ts);
+      return !sc.voided && t >= s - tol && t <= e + tol && compatible(seen, sc);
+    });
+    if (scanned) {
+      return {
+        outcome: "scanned",
+        reason: `Rule 1: ${scanned.name}${scanned.form ? ` (${scanned.form})` : ""} was scanned at ${clock(scanned.ts)}${rec.other ? ` in purchase ${rec.id}` : ""}, within ${rules.matchToleranceS} s of this chunk.`,
+      };
+    }
+    const carried =
+      s >= rec.closedAt && s <= rec.end && CARRY_AWAY.test(n) ? rec.paid.find((i) => compatible(seen, i)) : undefined;
+    if (carried) {
+      return {
+        outcome: "paid",
+        reason: rec.other
+          ? `Rule 2: after the payment of purchase ${rec.id}, and it describes carrying away a ${what(seen.forms, seen.colours)}; ${carried.name} was paid there.`
+          : `Rule 2: after payment, and it describes carrying away a ${what(seen.forms, seen.colours)}; ${carried.name} was paid.`,
+      };
+    }
+    return null;
+  };
 
   const judged: JudgedHint[] = !window
     ? []
@@ -377,24 +437,9 @@ export function judgePurchase(p: Purchase, hints: Hint[], cfg: JudgeConfig): Pur
           const colours = coloursIn(n);
           const base = { cameraId: h.cameraId, start: iso(s), end: iso(e), text, forms, colours };
           if (NEGATIVE.test(n)) return { ...base, outcome: "negative", reason: "The camera answered no." };
-          const scanned = scans.find((sc) => {
-            const t = ms(sc.ts);
-            return !sc.voided && t >= s - tol && t <= e + tol && compatible(base, sc);
-          });
-          if (scanned) {
-            return {
-              ...base,
-              outcome: "scanned",
-              reason: `Rule 1: ${scanned.name}${scanned.form ? ` (${scanned.form})` : ""} was scanned at ${clock(scanned.ts)}, within ${rules.matchToleranceS} s of this chunk.`,
-            };
-          }
-          const carried = s >= closedAt && CARRY_AWAY.test(n) ? paid.find((i) => compatible(base, i)) : undefined;
-          if (carried) {
-            return {
-              ...base,
-              outcome: "paid",
-              reason: `Rule 2: after payment, and it describes carrying away a ${what(forms, colours)}; ${carried.name} was paid.`,
-            };
+          for (const rec of [own, ...neighbours]) {
+            const explained = explain(rec, base, n, s, e);
+            if (explained) return { ...base, ...explained };
           }
           return {
             ...base,
@@ -406,7 +451,7 @@ export function judgePurchase(p: Purchase, hints: Hint[], cfg: JudgeConfig): Pur
   const remaining = judged.filter((j) => j.outcome === "remains");
   const camerasSaw = [...new Set(remaining.map((j) => j.cameraId))];
   const incident = remaining.length > 0;
-  const booked = scans.filter((s) => !s.voided).length;
+  const booked = bookedCount(scans);
   const till = `Till: ${booked} item${booked === 1 ? "" : "s"} scanned, total ${money(p.totalCents)}.`;
   const summary = !window
     ? `Purchase ${p.id}: nothing scanned, nothing to judge.`

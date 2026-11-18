@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   judgePurchase,
+  bookedCount,
   purchasesFromEvents,
   purchaseWindow,
   classify,
@@ -246,5 +247,37 @@ describe("multiFields", () => {
     expect(multiFields({ mode: "single", cameras: [{ id: "a" }] })).toEqual({});
     expect(multiFields({})).toEqual({});
     expect(multiFields({ mode: "multi" })).toEqual({ mode: "multi", cameras: [], sources: [], rules: DEFAULT_RULES });
+  });
+});
+
+describe("back-to-back purchases: the customer before is still leaving", () => {
+  const all = purchasesFromEvents([
+    ...till(67, "19:35:10Z", [["19:35:20Z", ITEM.apple], ["19:35:22Z", ITEM.jelly], ["19:35:29Z", ITEM.pea]], "19:35:34Z"),
+    ...till(68, "19:35:55Z", [["19:36:05Z", ITEM.jelly], ["19:36:09Z", ITEM.orange]], "19:36:13Z"),
+  ]);
+  const next = all.find((p) => p.id === "68")!;
+  const leaving = hint("overhead-cam", "19:35:39Z", "Yes - The green packaged item is picked up and carried away without being scanned.");
+
+  it("does not count a hint the previous purchase's basket explains", () => {
+    const v = judgePurchase(next, [leaving], { ...CFG, neighbours: all });
+    expect(v.incident).toBe(false);
+    expect(v.hints[0].outcome).toBe("paid");
+    expect(v.hints[0].reason).toContain("purchase 67");
+  });
+
+  it("counts it when the till record of the purchase before is unknown", () => {
+    expect(judgePurchase(next, [leaving], CFG).incident).toBe(true);
+  });
+
+  it("still keeps a hint that no purchase explains", () => {
+    const beside = hint("scanner-cam", "19:35:50Z", "Yes - snack packet - placed next to the scanner.");
+    expect(judgePurchase(next, [beside], { ...CFG, neighbours: all }).incident).toBe(true);
+  });
+});
+
+describe("bookedCount", () => {
+  it("takes one scan back per void row", () => {
+    expect(bookedCount([{ voided: false }, { voided: false }, { voided: true }])).toBe(1);
+    expect(bookedCount([{ voided: true }])).toBe(0);
   });
 });
