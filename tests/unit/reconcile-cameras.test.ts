@@ -127,6 +127,27 @@ describe("reconcileCameras", () => {
     expect(r.alreadyPresent).toEqual(["aisle-1"]);
   });
 
+  it("re-adds a desired camera whose only listed sensor is a removed tombstone", async () => {
+    const { adapter, added } = fakeAdapter([{ sensorId: "uuid-gone", name: "aisle-1", status: "removed" }]);
+    const r = await reconcileCameras([cam("aisle-1")], adapter, { prune: false });
+    expect(added.map((a) => a.name)).toEqual(["aisle-1"]);
+    expect(r.added).toEqual(["aisle-1"]);
+    expect(r.alreadyPresent).toEqual([]);
+  });
+
+  it("parks by the live sensor when a tombstone of the same name is listed after it", async () => {
+    const { adapter, removed } = fakeAdapter(
+      [
+        { sensorId: "uuid-live", name: "aisle-1", status: "online" },
+        { sensorId: "uuid-gone", name: "aisle-1", status: "removed" },
+      ],
+      { withRemove: true },
+    );
+    const r = await reconcileCameras([disabledCam("aisle-1")], adapter, { prune: false });
+    expect(removed).toEqual(["uuid-live"]);
+    expect(r.parked).toEqual(["aisle-1"]);
+  });
+
   it("still reports a genuine extra sensor that is online", async () => {
     // The guard must not silence the case the drift note exists for.
     const { adapter } = fakeAdapter([
