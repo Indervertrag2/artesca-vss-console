@@ -1,33 +1,22 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import type { OverviewSnapshot } from "@/lib/types";
-import { OverviewSnapshotSchema } from "@/lib/schemas";
 
-/** Client island: polls /api/status/overview every 5 s and refreshes the page. */
+/**
+ * Client island: re-renders the server page every 5 s via router.refresh().
+ * The server render collects the snapshot itself; polling /api/status/overview
+ * first would collect it twice per refresh. Skipped while the tab is hidden.
+ */
 export function OverviewAutoRefresh() {
   const router = useRouter();
 
-  const { dataUpdatedAt } = useQuery<OverviewSnapshot>({
-    queryKey: ["overview"],
-    queryFn: async () => {
-      const res = await fetch("/api/status/overview");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const raw = await res.json();
-      return OverviewSnapshotSchema.parse(raw);
-    },
-    refetchInterval: 5_000,
-    staleTime: 0,
-  });
-
-  // Each time fresh data arrives, trigger a server-component re-render via router.refresh()
   useEffect(() => {
-    if (dataUpdatedAt > 0) {
-      router.refresh();
-    }
-  }, [dataUpdatedAt, router]);
+    const id = setInterval(() => {
+      if (!document.hidden) router.refresh();
+    }, 5_000);
+    return () => clearInterval(id);
+  }, [router]);
 
   return null; // renders nothing — side-effect only
 }

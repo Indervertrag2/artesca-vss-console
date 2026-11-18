@@ -19,16 +19,16 @@ function stubAuth(page: Page) {
 
 // NOTE ON WHAT THESE STUBS CAN AND CANNOT DO.
 //
-// The overview page is a server component. OverviewAutoRefresh fetches
-// /api/status/overview only as a trigger and then calls router.refresh(), which
-// re-runs the server render — so the numbers and sections on screen always come
-// from collectOverviewSnapshot() on the server, never from the stub below.
-// Stubbing this route keeps the client island quiet and off the network; it does
+// The overview page is a server component. OverviewAutoRefresh calls
+// router.refresh() every 5 s, which re-runs the server render — so the numbers
+// and sections on screen always come from collectOverviewSnapshot() on the
+// server, never from the stub below. The page itself no longer fetches
+// /api/status/overview; the stub only keeps any client off the network; it does
 // not put fixture data on the page. An assertion about rendered cluster content
 // therefore needs a reachable cluster, not a richer stub.
 async function stubOverviewApis(page: Page) {
   await stubAuth(page);
-  // These stubs intercept client-side refetch requests from OverviewAutoRefresh
+  // Leftover stubs: OverviewAutoRefresh no longer fetches these routes.
   await page.route("/api/status/overview", (route) =>
     route.fulfill({
       status: 200,
