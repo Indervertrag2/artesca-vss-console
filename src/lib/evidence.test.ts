@@ -15,6 +15,12 @@ describe("verifyImmutable", () => {
     send.mockReset();
   });
 
+  it("reports inconclusive and sends no delete without a versionId — S3 would only add a delete marker", async () => {
+    const result = await verifyImmutable("cam-1/2026-07-08T00-00-00.mp4");
+    expect(result.status).toBe("inconclusive");
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("reports deleted when the delete succeeds — the lock is broken", async () => {
     send.mockResolvedValueOnce({});
     const result = await verifyImmutable("cam-1/2026-07-08T00-00-00.mp4", "v1");
