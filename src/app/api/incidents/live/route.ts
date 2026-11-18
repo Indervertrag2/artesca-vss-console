@@ -5,8 +5,8 @@
 // Elasticsearch and serves them at /api/v1/realtime/incidents — it does NOT
 // publish them to any Kafka topic, so this SSE POLLS the bridge and pushes
 // newly-seen incidents (rather than consuming Kafka). The first poll primes the
-// seen-set without emitting (latest-only semantics — the page's initial
-// GET /api/incidents already rendered the backlog).
+// seen-set without emitting (latest-only semantics — the page refetches
+// GET /api/incidents each time the stream opens, which covers that poll).
 // Auth required.
 
 import { type NextRequest, NextResponse } from "next/server";

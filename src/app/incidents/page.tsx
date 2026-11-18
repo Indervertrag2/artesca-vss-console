@@ -196,9 +196,6 @@ function IncidentsPageContent() {
     [mergeIncident]
   );
 
-  // SSE subscription with exponential back-off reconnect (topology-mirrored pattern).
-  const { streamStatus, sseFailed, lastEventAt } = useIncidentStream({ onIncident: handleSseIncident });
-
   // 1-second ticker so the freshness label stays accurate between events.
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1_000);
@@ -218,6 +215,14 @@ function IncidentsPageContent() {
     refetchOnWindowFocus: false,
     // A failed load retries on its own: the kiosk wall has no Retry button.
     refetchInterval: (query) => (query.state.status === "error" ? 10_000 : false),
+  });
+
+  // SSE subscription with exponential back-off reconnect (topology-mirrored pattern).
+  // Each open refetches the backlog: the stream's first poll only primes its
+  // seen-set, so whatever was raised before it would otherwise never show.
+  const { streamStatus, sseFailed, lastEventAt } = useIncidentStream({
+    onIncident: handleSseIncident,
+    onOpen: () => void backlog.refetch(),
   });
 
   const incidents = useMemo(() => {

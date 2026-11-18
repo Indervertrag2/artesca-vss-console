@@ -17,6 +17,9 @@
  *   badge can reflect reality rather than just connection readiness.
  * - Calls `onIncident` for each validated SSE event; caller owns dedup +
  *   state merge.
+ * - Calls `onOpen` each time a connection opens. The route's first poll only
+ *   records what it sees, so an incident raised before (or while the stream
+ *   was down) is never pushed: the caller refetches the backlog here.
  * - Cleans up (close + clear timers) on unmount.
  */
 
@@ -31,6 +34,7 @@ const MAX_BACKOFF_MS = 30_000;
 
 interface UseIncidentStreamOptions {
   onIncident: (inc: Incident) => void;
+  onOpen?: () => void;
 }
 
 interface UseIncidentStreamResult {
@@ -41,6 +45,7 @@ interface UseIncidentStreamResult {
 
 export function useIncidentStream({
   onIncident,
+  onOpen,
 }: UseIncidentStreamOptions): UseIncidentStreamResult {
   const [streamStatus, setStreamStatus] = useState<StreamStatus>("reconnecting");
   const [sseFailed, setSseFailed] = useState(false);
@@ -49,8 +54,10 @@ export function useIncidentStream({
   // Stable ref so the closure inside connect() always calls the latest onIncident
   // without re-running the effect when the caller memoises differently.
   const onIncidentRef = useRef(onIncident);
+  const onOpenRef = useRef(onOpen);
   useEffect(() => {
     onIncidentRef.current = onIncident;
+    onOpenRef.current = onOpen;
   });
 
   useEffect(() => {
@@ -97,6 +104,7 @@ export function useIncidentStream({
         attempt = 0;
         setSseFailed(false);
         setStreamStatus("connected");
+        onOpenRef.current?.();
       };
 
       es.onerror = () => {
