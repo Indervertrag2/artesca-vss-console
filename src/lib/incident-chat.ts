@@ -16,10 +16,25 @@ export function incidentChatHref(sensorId: string, ts: string, end?: unknown): s
   return `/chat?sensor=${encodeURIComponent(sensorId)}&ts=${encodeURIComponent(ts)}${q}`;
 }
 
+/** What /chat scopes to when opened from an incident: the incident's recording,
+ *  not the live camera. `from`/`to` are the recording window (±30 s margin). */
+export interface IncidentChatPrefill {
+  sensor: string;
+  question: string;
+  from: string;
+  to: string;
+}
+
+/** Appended to each follow-up while the chat is scoped to an incident recording,
+ *  so the agent keeps answering from that window instead of the live feed. */
+export function incidentScopeNote(p: IncidentChatPrefill): string {
+  return ` (about the recorded incident on sensor ${p.sensor}, recording from ${p.from} to ${p.to}: answer from this recording, not from the live camera)`;
+}
+
 /** Scope + question from /chat's query string; null without a sensor and a valid ts.
  *  Timestamps go out as toISOString() (YYYY-MM-DDTHH:MM:SS.sssZ), the format the
  *  agent's prompt requires. */
-export function incidentChatPrefill(search: string): { sensor: string; question: string } | null {
+export function incidentChatPrefill(search: string): IncidentChatPrefill | null {
   const p = new URLSearchParams(search);
   const sensor = p.get("sensor")?.trim();
   const start = parseDate(p.get("ts"));
@@ -31,6 +46,8 @@ export function incidentChatPrefill(search: string): { sensor: string; question:
   const until = end ? ` (until ${end.toISOString()})` : "";
   return {
     sensor,
+    from,
+    to,
     question:
       `Tell me about the incident on sensor ${sensor} at ${start.toISOString()}${until}. ` +
       `Use the incident from rtvi_vlm_alert get_incidents for sensor ${sensor} and run video understanding from ${from} to ${to}. ` +

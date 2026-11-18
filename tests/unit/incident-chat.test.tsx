@@ -13,7 +13,7 @@ vi.mock("@/components/MarkdownReport", () => ({ MarkdownReport: ({ markdown }: {
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(window.location.search) }));
 
 import ChatPage from "@/app/chat/page";
-import { incidentChatHref, incidentChatPrefill } from "@/lib/incident-chat";
+import { incidentChatHref, incidentChatPrefill, incidentScopeNote } from "@/lib/incident-chat";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 Element.prototype.scrollTo = () => {};
@@ -42,7 +42,12 @@ describe("incidentChatHref", () => {
 describe("incidentChatPrefill", () => {
   it("round-trips the href into a question with ISO timestamps and a ±30 s window", () => {
     const href = incidentChatHref("camera-2", "2026-01-02T03:04:05Z", "2026-01-02T03:04:15.5Z");
-    expect(incidentChatPrefill(href.slice(href.indexOf("?")))).toEqual({ sensor: "camera-2", question: QUESTION });
+    expect(incidentChatPrefill(href.slice(href.indexOf("?")))).toEqual({
+      sensor: "camera-2",
+      question: QUESTION,
+      from: "2026-01-02T03:03:35.000Z",
+      to: "2026-01-02T03:04:45.500Z",
+    });
   });
 
   it("windows around ts alone when end is missing or not after ts", () => {
@@ -69,7 +74,7 @@ describe("/chat from an incident link", () => {
     window.history.replaceState(null, "", "/");
   });
 
-  it("scopes to a sensor missing from /api/cameras, prefills the question and drops the params", async () => {
+  it("scopes to the incident recording, prefills the question and drops the params", async () => {
     const fetchMock = vi.fn(async (url: string) =>
       url === "/api/chat"
         ? Response.json({ choices: [{ message: { content: "ok" } }] })
@@ -87,17 +92,53 @@ describe("/chat from an incident link", () => {
 
     const select = container.querySelector("select") as HTMLSelectElement;
     const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
-    expect(select.value).toBe("camera-2");
-    expect([...select.options].map((o) => o.textContent)).toContain("camera-2");
+    expect(select.value).toBe("__incident__");
+    const labels = [...select.options].map((o) => o.textContent ?? "");
+    expect(labels[0]).toMatch(/^Incident recording: camera-2, /);
+    // The live camera stays selectable, even one missing from /api/cameras.
+    expect(labels).toContain("camera-2");
     expect(textarea.value).toBe(QUESTION);
     expect(window.location.search).toBe("");
 
-    // The question names the sensor, so the scope adds no "(sensor: …)" suffix.
+    // The question names the recording window, so the scope adds no suffix.
     await act(async () => {
       container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     });
     const call = fetchMock.mock.calls.find(([url]) => url === "/api/chat") as unknown as [string, RequestInit];
     const body = JSON.parse(call[1].body as string) as { messages: { content: string }[] };
     expect(body.messages.at(-1)!.content).toBe(QUESTION);
+  });
+
+  it("keeps follow-ups on the recording and never persists the incident scope", async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      url === "/api/chat"
+        ? Response.json({ choices: [{ message: { content: "ok" } }] })
+        : Response.json({ cameras: [{ id: "camera-2" }], available: false, voices: [] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    localStorage.setItem("nvidia-vss-chat-scope", "camera-1");
+    window.history.replaceState(null, "", incidentChatHref("camera-2", "2026-01-02T03:04:05Z", "2026-01-02T03:04:15.5Z"));
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<ChatPage />);
+    });
+    const textarea = container.querySelector("textarea") as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(textarea, "What was scanned?");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    const call = fetchMock.mock.calls.find(([url]) => url === "/api/chat") as unknown as [string, RequestInit];
+    const body = JSON.parse(call[1].body as string) as { messages: { content: string }[] };
+    const prefill = incidentChatPrefill("sensor=camera-2&ts=2026-01-02T03:04:05Z&end=2026-01-02T03:04:15.5Z")!;
+    expect(body.messages.at(-1)!.content).toBe("What was scanned?" + incidentScopeNote(prefill));
+    expect(localStorage.getItem("nvidia-vss-chat-scope")).toBe("camera-1");
   });
 });

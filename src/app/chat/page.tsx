@@ -7,7 +7,7 @@ import { Shell } from "@/components/Shell";
 import { MarkdownReport } from "@/components/MarkdownReport";
 import { useVoice, stripMarkdownForSpeech } from "@/lib/use-voice";
 import { useAgentUiUrl } from "@/components/BoxModeProvider";
-import { incidentChatPrefill } from "@/lib/incident-chat";
+import { incidentChatPrefill, incidentScopeNote } from "@/lib/incident-chat";
 
 type Role = "user" | "assistant" | "system";
 type Message = { role: Role; content: string; ts: string };
@@ -20,6 +20,13 @@ const SCOPE_KEY = "nvidia-vss-chat-scope";
 const CONVERSATION_KEY = "nvidia-vss-chat-conversation-id";
 const VOICE_KEY = "nvidia-vss-chat-voice";
 const SCOPE_ALL = "__all__";
+/** The recording of the incident /chat was opened from; never persisted. */
+const SCOPE_INCIDENT = "__incident__";
+
+/** Local wall-clock time of an ISO timestamp, for the scope label. */
+function clock(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour12: false });
+}
 
 /** Parse a voice-selector value ("browser:<uri>" | "nim:<name>") into speak() opts. */
 function parseVoiceChoice(choice: string): {
@@ -177,7 +184,7 @@ function Chat() {
   const [showReasoning, setShowReasoning] = useState(false);
   const [cameras, setCameras] = useState<Camera[] | null>(null);
   const [scope, setScope] = useState<string>(() => {
-    if (prefill) return prefill.sensor;
+    if (prefill) return SCOPE_INCIDENT;
     if (typeof window === "undefined") return SCOPE_ALL;
     try {
       return localStorage.getItem(SCOPE_KEY) ?? SCOPE_ALL;
@@ -238,8 +245,10 @@ function Chat() {
     if (prefill) window.history.replaceState(null, "", window.location.pathname);
   }, [prefill]);
 
-  // Persist scope.
+  // Persist scope. An incident recording is a one-off: the next plain visit
+  // returns to the last camera choice.
   useEffect(() => {
+    if (scope === SCOPE_INCIDENT) return;
     try {
       localStorage.setItem(SCOPE_KEY, scope);
     } catch {
@@ -287,10 +296,12 @@ function Chat() {
 
   // Resolve scope → camera record for hint rendering + system-message context.
   // A sensor outside /api/cameras (e.g. one an incident linked to) still scopes.
-  const scopedCamera = useMemo<Camera | null>(
-    () => (scope === SCOPE_ALL ? null : cameras?.find((c) => c.id === scope) ?? { id: scope }),
-    [scope, cameras],
-  );
+  const incidentScope = scope === SCOPE_INCIDENT ? prefill : null;
+  const scopedCamera = useMemo<Camera | null>(() => {
+    if (scope === SCOPE_ALL) return null;
+    const id = scope === SCOPE_INCIDENT ? prefill?.sensor : scope;
+    return id ? cameras?.find((c) => c.id === id) ?? { id } : null;
+  }, [scope, cameras, prefill]);
   const liveCount = useMemo(
     () => cameras?.filter((c) => c.feeds?.some((f) => f.vstRegistered)).length ?? 0,
     [cameras],
@@ -373,8 +384,15 @@ function Chat() {
       // tool router acts on it immediately (system messages alone are ignored
       // by the agent's top_agent pipeline which calls get_sensor_names first).
       // The displayed transcript uses the original text; only the wire payload
-      // carries the camera suffix.
+      // carries the camera suffix. Scoped to an incident recording, the suffix
+      // is the recording window instead, unless the message already names it
+      // (the prefilled question does).
       const wireMessages = next.map(({ role, content }, idx) => {
+        if (incidentScope && role === "user" && idx === next.length - 1) {
+          return content.includes(incidentScope.from)
+            ? { role, content }
+            : { role, content: content + incidentScopeNote(incidentScope) };
+        }
         if (
           scopedCamera != null &&
           role === "user" &&
@@ -642,8 +660,13 @@ function Chat() {
               onChange={(e) => setScope(e.target.value)}
               className="rounded border border-input bg-card px-2 py-1 font-mono text-[11px] text-foreground hover:border-border focus:border-brand-teal focus:outline-none"
               disabled={loading}
-              title="Restrict the agent to a specific camera. Pick 'All cameras' to query the whole fleet."
+              title="Restrict the agent to a specific camera or to the recording of the incident this chat was opened from. Pick 'All cameras' to query the whole fleet."
             >
+              {prefill && (
+                <option value={SCOPE_INCIDENT}>
+                  Incident recording: {prefill.sensor}, {clock(prefill.from)} to {clock(prefill.to)}
+                </option>
+              )}
               <option value={SCOPE_ALL}>
                 All cameras{cameras ? ` (${cameras.length} registered, ${liveCount} live)` : ""}
               </option>
@@ -702,7 +725,16 @@ function Chat() {
           )}
           {scopedCamera && (
             <span className="text-brand-teal">
-              Asking about <span className="font-mono">{scopedCamera.id}</span>
+              {incidentScope ? (
+                <>
+                  Asking about the recording of <span className="font-mono">{scopedCamera.id}</span> from{" "}
+                  {clock(incidentScope.from)} to {clock(incidentScope.to)}
+                </>
+              ) : (
+                <>
+                  Asking about <span className="font-mono">{scopedCamera.id}</span>
+                </>
+              )}
             </span>
           )}
         </div>
