@@ -16,7 +16,7 @@
 // sibling [segment] route then serves the .ts files from the same cache dir.
 
 import { NextResponse } from "next/server";
-import { resolveStreamId, buildVstClipUrl, clipWindow } from "@/lib/streams/vst-clip";
+import { resolveStreamId, buildVstClipUrl, clipWindow, CLIP_SETTLE_MS } from "@/lib/streams/vst-clip";
 import {
   cachePath,
   isCacheFresh,
@@ -133,6 +133,21 @@ export async function serveClipPlaylist(
     });
   }
 
+  // A span VST has not finalized yet comes back missing or cut short, and a
+  // cut clip would stay cached for a day: 425 tells the player to wait.
+  if (span && !win.settled) {
+    const retryAfter = Math.max(1, Math.ceil((win.end.getTime() + CLIP_SETTLE_MS - Date.now()) / 1_000));
+    return NextResponse.json(
+      {
+        error: "Clip is still being recorded",
+        requestedTs: ts,
+        window: { start: win.start.toISOString(), end: win.end.toISOString() },
+        retryAfterSeconds: retryAfter,
+      },
+      { status: 425, headers: { "Retry-After": String(retryAfter), "Cache-Control": "no-store" } }
+    );
+  }
+
   // --- Cache miss — resolve source ---
   const tsRounded = roundTs(ts);
   let mp4Buffer: Buffer | null = null;
@@ -173,8 +188,9 @@ export async function serveClipPlaylist(
       // most recent recorded window so the camera's clip still plays. No-op for
       // clock-synced cameras (the exact fetch succeeds). Only for a fresh
       // incident: for an older one the recent window is unrelated footage, and
-      // its missing window (retention, a gap) is a 404 with diagnostics.
-      if (!mp4Buffer && Math.abs(Date.now() - new Date(ts).getTime()) <= RECENT_FALLBACK_MAX_AGE_MS) {
+      // its missing window (retention, a gap) is a 404 with diagnostics. Never
+      // for a span: its window is settled by now, so the same holds.
+      if (!mp4Buffer && !span && Math.abs(Date.now() - new Date(ts).getTime()) <= RECENT_FALLBACK_MAX_AGE_MS) {
         const recentTs = new Date(Date.now() - 30_000).toISOString();
         mp4Buffer = await fetchMp4FromUrl(buildVstClipUrl(streamId, recentTs), diag);
         if (mp4Buffer) {

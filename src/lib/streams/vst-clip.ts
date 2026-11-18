@@ -68,29 +68,54 @@ export async function resolveStreamId(sensor: string): Promise<string | null> {
 const isoDatetime = z.string().datetime({ offset: true });
 
 /**
+ * Footage kept after an incident's chunk end. The VLM fires on the chunk in
+ * which the act begins (a person walking up with the goods); the act itself
+ * follows. Measured on a self-checkout loop: the alert chunk ended as the
+ * person arrived, the items went past the scanner over the next 17 s.
+ * `CLIP_TAIL_S` overrides it per deployment.
+ */
+const TAIL_MS = (Number(process.env.CLIP_TAIL_S) || 20) * 1_000;
+
+/**
+ * VST finalizes a recording late: measured, a window that ended 10 s ago 404s
+ * (VMSNoDataError), 30 s ago returns 17 of 20 s, 50 s ago is complete.
+ */
+export const CLIP_SETTLE_MS = 60_000;
+
+/**
  * The clip window for an incident. Without `end`: ±5 s around `ts`. With an
  * `end` (a valid ISO datetime after `ts`, anything else is ignored), the
- * incident's span — `ts` is the chunk start — padded to [ts - 2 s, end + 2 s]
+ * incident's span — `ts` is the chunk start — padded to [ts - 2 s, end + tail]
  * and capped at 60 s. `key` names the PVC cache entry, so a span never reuses
- * the cached ±5 s clip of the same `ts`. `thumbSecs`: thumbnail offset, the
- * middle of a span.
+ * the cached ±5 s clip of the same `ts`, nor a clip cut with another tail.
+ * `thumbSecs`: thumbnail offset, the middle of a span. `settled`: VST has
+ * finalized the whole window, so fetching it now neither misses nor truncates.
  */
 export function clipWindow(
   ts: string,
   end?: string | null,
-): { start: Date; end: Date; key: string; thumbSecs: number } {
+  now = Date.now(),
+): { start: Date; end: Date; key: string; thumbSecs: number; settled: boolean } {
   const t = new Date(ts).getTime();
   const e = end && isoDatetime.safeParse(end).success ? new Date(end).getTime() : NaN;
   if (!(e > t)) {
-    return { start: new Date(t - 5_000), end: new Date(t + 5_000), key: ts, thumbSecs: 0 };
+    const stop = t + 5_000;
+    return {
+      start: new Date(t - 5_000),
+      end: new Date(stop),
+      key: ts,
+      thumbSecs: 0,
+      settled: stop <= now - CLIP_SETTLE_MS,
+    };
   }
   const start = t - 2_000;
-  const stop = Math.min(e + 2_000, start + 60_000);
+  const stop = Math.min(e + TAIL_MS, start + 60_000);
   return {
     start: new Date(start),
     end: new Date(stop),
-    key: `${ts}_${end}`,
+    key: `${ts}_${end}_${TAIL_MS / 1_000}s`,
     thumbSecs: (stop - start) / 2_000,
+    settled: stop <= now - CLIP_SETTLE_MS,
   };
 }
 

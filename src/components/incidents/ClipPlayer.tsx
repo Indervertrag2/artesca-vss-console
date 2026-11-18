@@ -165,10 +165,15 @@ export function ClipPlayer({ src, seekOffset, clipStatus, fallbackMeta }: ClipPl
   // entirely and go straight to the data-only fallback.
   const permanentlyFailed = clipStatus === "failed";
 
+  // The clip route answered 425: VST is still recording the window. Not a
+  // failure, however long it takes, so it does not spend the retry budget.
+  const [recording, setRecording] = useState(false);
+
   // Whether a HLS error should be treated as transient (still materialising)
   // vs permanent.  "pending" status or early retries = transient.
   const isTransient =
-    (clipStatus === "pending" || clipStatus == null) && retryCount < MAX_RETRIES;
+    recording ||
+    ((clipStatus === "pending" || clipStatus == null) && retryCount < MAX_RETRIES);
 
   useEffect(() => {
     if (permanentlyFailed) return;
@@ -200,6 +205,7 @@ export function ClipPlayer({ src, seekOffset, clipStatus, fallbackMeta }: ClipPl
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
+          setRecording(data.response?.code === 425);
           setHlsError(data.details ?? "network error");
         }
       });
@@ -328,8 +334,9 @@ export function ClipPlayer({ src, seekOffset, clipStatus, fallbackMeta }: ClipPl
     );
   }
 
-  // Clip still materialising: a transient error, or a retry still loading.
-  const preparing = hlsError != null || (retryCount > 0 && !ready);
+  // Clip still materialising: a transient error, or a retry still loading, or
+  // VST still recording the window (425).
+  const preparing = hlsError != null || ((retryCount > 0 || recording) && !ready);
 
   // ── Render: normal player ─────────────────────────────────────────────────
   return (

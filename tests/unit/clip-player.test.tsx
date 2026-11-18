@@ -268,6 +268,27 @@ describe("ClipPlayer fallback states", () => {
     vi.unstubAllGlobals();
   });
 
+  it("keeps waiting past the retry budget while the route answers 425", async () => {
+    await act(async () => {
+      root.render(<ClipPlayer src="/api/clips/cam/ts/index.m3u8" fallbackMeta={META} />);
+    });
+
+    // Every attempt: still being recorded. Ten rounds is well past MAX_RETRIES.
+    for (let i = 0; i < 10; i++) {
+      await act(async () => {
+        HlsMock._getHandler()?.(null, {
+          fatal: true,
+          details: "manifestLoadError",
+          response: { code: 425 },
+        } as never);
+      });
+      await act(async () => { vi.advanceTimersByTime(4_100); });
+    }
+    expect(getByTestId(container, "clip-materialising")).not.toBeNull();
+    expect(getByTestId(container, "clip-unavailable")).toBeNull();
+    expect(HlsMock._getCallCount()).toBeGreaterThan(10);
+  });
+
   // ── 6. Normal render: video element present, no fallback shown ────────────
 
   it("renders the video element (not a fallback) when no error occurs", async () => {
