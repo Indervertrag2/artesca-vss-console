@@ -354,7 +354,7 @@ const COLOUR_WORDS: Record<string, RegExp> = {
 
 /** A hint about something leaving: after payment that is the customer going home. */
 const CARRY_AWAY =
-  /\baway\b|walks? off|\bleav(es|ing)\b|\bcarr(y|ies|ied|ying)\b|\btak(es|en|ing)\b|\btook\b|picks? up|picked up|\bremov(es|ed|ing)\b|pocket|\bweg\b|mitgenommen|\bnimmt\b|traegt|\bgeht\b/;
+  /\baway\b|walks? off|\bleav(es|ing)\b|\bcarr(y|ies|ied|ying)\b|\btak(es|en|ing)\b|\btook\b|picks? up|picked up|\bremov(es|ed|ing)\b|pocket|out of (the )?(frame|view|picture|shot)|\bweg\b|mitgenommen|\bnimmt\b|traegt|\bgeht\b/;
 
 /** A "No" answer is not a hint, whatever else it says. */
 const NEGATIVE = /^\W*(no|nein)\b/;
@@ -571,10 +571,10 @@ export function judgePurchase(p: Purchase, hints: Hint[], cfg: JudgeConfig): Pur
   const summary = !window
     ? `Purchase ${p.id}: nothing scanned, nothing to judge.`
     : incident
-      ? `Purchase ${p.id}: ${remaining.length} camera hint${remaining.length === 1 ? "" : "s"} not explained by the till, ` +
-        `seen by ${camerasSaw.length} of ${cfg.cameras.length} camera${cfg.cameras.length === 1 ? "" : "s"} (${camerasSaw.join(", ")}). ` +
-        `${remaining[0].cameraId} ${clock(remaining[0].start)}: "${short(remaining[0].text)}". ${till}`
-      : `Purchase ${p.id}: ${judged.length ? `all ${judged.length} camera hint${judged.length === 1 ? "" : "s"} explained by the till` : "no camera hints"}. ${till}`;
+      ? // What triggered it, in the camera's own words: the first hint the till does not explain.
+        // Which cameras saw it and what the till booked are the detail view's "Why".
+        remaining[0].text
+      :`Purchase ${p.id}: ${judged.length ? `all ${judged.length} camera hint${judged.length === 1 ? "" : "s"} explained by the till` : "no camera hints"}. ${till}`;
 
   return {
     scenarioId: cfg.scenarioId,

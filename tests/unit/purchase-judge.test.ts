@@ -84,8 +84,7 @@ describe("purchase 63, theft: an item went past the scanner", () => {
     expect(v.severity).toBe("high");
     expect(v.camerasSaw).toEqual(["scanner-cam"]);
     expect(v.hints[0]).toMatchObject({ outcome: "remains", forms: ["bag"] });
-    expect(v.summary).toContain("seen by 1 of 2 cameras (scanner-cam)");
-    expect(v.summary).toContain("total 5.00");
+    expect(v.summary).toBe("Yes - snack packet - placed on the side table next to the scanner.");
     // Names come from the paid basket; scans only carry an EAN.
     expect(v.scans.map((s) => s.name)).toEqual([ITEM.cola.name, ITEM.pea.name, ITEM.orange.name]);
   });
@@ -414,5 +413,14 @@ describe("window counted from the start of the purchase", () => {
   it("falls back to the first scan when the purchase was opened long before it", () => {
     const p = only(till(62, "17:06:00Z", [["17:37:40Z", ITEM.apple]], "17:37:49Z"));
     expect(purchaseWindow(p, rules)?.start).toBe(`${D}17:37:30.000Z`);
+  });
+});
+
+describe("rule 2: leaving the picture counts as carrying away", () => {
+  it("explains a paid bottle that is moved out of frame after the payment", () => {
+    const p = only(till(70, "00:07:13Z", [["00:07:16Z", ITEM.cola], ["00:07:24Z", ITEM.orange]], "00:07:28Z"));
+    const v = judgePurchase(p, [hint("overhead-cam", "00:07:29Z", "Yes - A green bottle is moved by the person to their right side and then out of frame.")], CFG);
+    expect(v.incident).toBe(false);
+    expect(v.hints[0].outcome).toBe("paid");
   });
 });
