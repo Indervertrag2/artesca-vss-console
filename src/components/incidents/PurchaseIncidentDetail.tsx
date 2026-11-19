@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -10,10 +10,11 @@ import { money, purchaseChatQuestion, type HintOutcome, type PurchaseVerdict } f
 import { ClipPlayer } from "./ClipPlayer";
 import type { Incident } from "@/lib/types";
 
-// The detail of a purchase incident (multi-camera scenario): the till record,
-// every camera hint with the rule that discarded it or why it remained, one clip
-// per camera loaded only on request, and a chat that starts from the till data.
-// A verdict judged from the recording also says how it was cut and asked.
+// The detail of a purchase incident (multi-camera scenario): one clip per camera,
+// loaded only on request and played together, then the till record and every
+// camera hint with the rule that discarded it or why it remained, and a chat that
+// starts from the till data. A verdict judged from the recording also says how it
+// was cut and asked.
 
 const OUTCOME: Record<HintOutcome, { label: string; cls: string }> = {
   remains: { label: "not explained", cls: "bg-red-50 text-red-700 border-red-200" },
@@ -24,6 +25,9 @@ const OUTCOME: Record<HintOutcome, { label: string; cls: string }> = {
 
 const time = (t: string) => new Date(t).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
+/** Clips further apart than this are pulled together; below it a seek would only stutter. */
+const SYNC_SLACK_S = 0.3;
+
 interface Props {
   incident: Incident;
   verdict: PurchaseVerdict;
@@ -32,6 +36,7 @@ interface Props {
 
 export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props) {
   const [open, setOpen] = useState<Set<string>>(new Set());
+  const clips = useRef<HTMLDivElement>(null);
   const w = v.window ?? { start: v.closedAt, end: v.closedAt };
   // Only on a verdict judged from the recording: chunks put to the model, per camera.
   const asked = v.evidence === "recording" ? (v.chunksAsked ?? {}) : null;
@@ -43,10 +48,50 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
       else next.add(id);
       return next;
     });
+  const allOpen = v.cameras.length > 0 && v.cameras.every((c) => open.has(c.id));
+
+  // Every clip covers the same purchase window, so the open ones run as one: play,
+  // pause and seek on any of them carry over to the others, at the same second.
+  // Media events do not bubble; they are caught on the way down, so a clip that is
+  // opened later needs no listener of its own.
+  useEffect(() => {
+    const box = clips.current;
+    if (!box) return;
+    const others = (from: EventTarget | null) =>
+      [...box.querySelectorAll("video")].filter((x) => x !== from);
+    const align = (from: HTMLVideoElement, to: HTMLVideoElement) => {
+      if (Math.abs(to.currentTime - from.currentTime) > SYNC_SLACK_S) to.currentTime = from.currentTime;
+    };
+    const onPlay = (e: Event) => {
+      const from = e.target as HTMLVideoElement;
+      for (const o of others(from)) {
+        align(from, o);
+        if (o.paused) void o.play().catch(() => undefined);
+      }
+    };
+    const onPause = (e: Event) => {
+      const from = e.target as HTMLVideoElement;
+      // The end of the shorter clip is a pause too; it must not stop the longer one.
+      if (from.ended) return;
+      for (const o of others(from)) if (!o.paused) o.pause();
+    };
+    const onSeeked = (e: Event) => {
+      const from = e.target as HTMLVideoElement;
+      for (const o of others(from)) align(from, o);
+    };
+    box.addEventListener("play", onPlay, true);
+    box.addEventListener("pause", onPause, true);
+    box.addEventListener("seeked", onSeeked, true);
+    return () => {
+      box.removeEventListener("play", onPlay, true);
+      box.removeEventListener("pause", onPause, true);
+      box.removeEventListener("seeked", onSeeked, true);
+    };
+  }, []);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center rounded border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium uppercase text-red-700">
@@ -59,14 +104,71 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
 
         <div className="min-w-0 space-y-5 text-sm">
           <p>{v.summary}</p>
-          {asked && (
-            <p className="text-xs text-muted-foreground">
-              {`Evidence: recording, ${v.chunkS} s chunks, ${v.overlapS} s overlap; ${perCamera} chunk${perCamera === "1" ? "" : "s"} per camera`}
-            </p>
-          )}
+
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xs font-medium uppercase text-muted-foreground">Cameras</h3>
+              {v.cameras.length > 1 && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 shrink-0 px-2 text-[11px]"
+                  onClick={() => setOpen(allOpen ? new Set() : new Set(v.cameras.map((c) => c.id)))}
+                >
+                  <Video className="mr-1.5 h-3 w-3" />
+                  {allOpen ? "Close all clips" : "Open all clips"}
+                </Button>
+              )}
+            </div>
+            {/* Side by side from two cameras on: the clips are watched together. */}
+            <div ref={clips} className={v.cameras.length > 1 ? "grid gap-2 md:grid-cols-2" : "space-y-2"}>
+              {v.cameras.map((c) => (
+                <div key={c.id} className="min-w-0 rounded border border-border p-2">
+                  {/* The text wraps, the button never does: every camera's button sits in the same right-hand column. */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 pt-1.5 text-xs">
+                      <span className="font-mono">{c.id}</span>
+                      {c.view && <span className="ml-2 text-muted-foreground">{c.view}</span>}
+                      <span className="ml-2">{v.camerasSaw.includes(c.id) ? "saw it" : "no unexplained hint"}</span>
+                      {asked && (
+                        <span className="ml-2 text-muted-foreground">
+                          {`${v.hints.filter((h) => h.cameraId === c.id && h.outcome !== "negative").length} of ${asked[c.id] ?? 0} chunks reported something`}
+                        </span>
+                      )}
+                    </div>
+                    <Button type="button" variant="outline" size="sm" className="h-7 w-24 shrink-0 px-2 text-[11px]" onClick={() => toggle(c.id)}>
+                      <Video className="mr-1.5 h-3 w-3" />
+                      {open.has(c.id) ? "Close clip" : "Open clip"}
+                    </Button>
+                  </div>
+                  {open.has(c.id) && (
+                    <div className="mt-2">
+                      <ClipPlayer
+                        src={incidentClipUrl(c.id, w.start, w.end)}
+                        clipStatus={incident.clipStatus}
+                        fallbackMeta={{
+                          ts: w.start,
+                          sensorId: c.id,
+                          severity: incident.severity,
+                          summary: v.summary,
+                          scenarioName: v.scenarioName,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
 
           <section className="space-y-3">
             <h3 className="text-xs font-medium uppercase text-muted-foreground">Why</h3>
+            {asked && (
+              <p className="text-xs text-muted-foreground">
+                {`Evidence: recording, ${v.chunkS} s chunks, ${v.overlapS} s overlap; ${perCamera} chunk${perCamera === "1" ? "" : "s"} per camera`}
+              </p>
+            )}
 
             <div className="rounded border border-border p-3">
               <p className="mb-2 text-xs text-muted-foreground">
@@ -109,46 +211,6 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
                 </div>
               ))}
             </div>
-          </section>
-
-          <section className="space-y-2">
-            <h3 className="text-xs font-medium uppercase text-muted-foreground">Cameras</h3>
-            {v.cameras.map((c) => (
-              <div key={c.id} className="rounded border border-border p-2">
-                {/* The text wraps, the button never does: every camera's button sits in the same right-hand column. */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1 pt-1.5 text-xs">
-                    <span className="font-mono">{c.id}</span>
-                    {c.view && <span className="ml-2 text-muted-foreground">{c.view}</span>}
-                    <span className="ml-2">{v.camerasSaw.includes(c.id) ? "saw it" : "no unexplained hint"}</span>
-                    {asked && (
-                      <span className="ml-2 text-muted-foreground">
-                        {`${v.hints.filter((h) => h.cameraId === c.id && h.outcome !== "negative").length} of ${asked[c.id] ?? 0} chunks reported something`}
-                      </span>
-                    )}
-                  </div>
-                  <Button type="button" variant="outline" size="sm" className="h-7 w-24 shrink-0 px-2 text-[11px]" onClick={() => toggle(c.id)}>
-                    <Video className="mr-1.5 h-3 w-3" />
-                    {open.has(c.id) ? "Close clip" : "Open clip"}
-                  </Button>
-                </div>
-                {open.has(c.id) && (
-                  <div className="mt-2">
-                    <ClipPlayer
-                      src={incidentClipUrl(c.id, w.start, w.end)}
-                      clipStatus={incident.clipStatus}
-                      fallbackMeta={{
-                        ts: w.start,
-                        sensorId: c.id,
-                        severity: incident.severity,
-                        summary: v.summary,
-                        scenarioName: v.scenarioName,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
           </section>
 
           <Button asChild variant="outline" size="sm" className="h-7 px-2 text-[11px]">
