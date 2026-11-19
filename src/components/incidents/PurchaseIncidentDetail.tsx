@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,9 @@ interface Props {
 
 export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props) {
   const [open, setOpen] = useState<Set<string>>(new Set());
-  const clips = useRef<HTMLDivElement>(null);
+  // State, not a ref: the dialog mounts its content after this component's first
+  // effect, and the listeners below have to attach when the element arrives.
+  const [clips, setClips] = useState<HTMLDivElement | null>(null);
   const w = v.window ?? { start: v.closedAt, end: v.closedAt };
   // Only on a verdict judged from the recording: chunks put to the model, per camera.
   const asked = v.evidence === "recording" ? (v.chunksAsked ?? {}) : null;
@@ -55,7 +57,7 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
   // Media events do not bubble; they are caught on the way down, so a clip that is
   // opened later needs no listener of its own.
   useEffect(() => {
-    const box = clips.current;
+    const box = clips;
     if (!box) return;
     const others = (from: EventTarget | null) =>
       [...box.querySelectorAll("video")].filter((x) => x !== from);
@@ -87,7 +89,7 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
       box.removeEventListener("pause", onPause, true);
       box.removeEventListener("seeked", onSeeked, true);
     };
-  }, []);
+  }, [clips]);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -122,7 +124,7 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
               )}
             </div>
             {/* Side by side from two cameras on: the clips are watched together. */}
-            <div ref={clips} className={v.cameras.length > 1 ? "grid gap-2 md:grid-cols-2" : "space-y-2"}>
+            <div ref={setClips} className={v.cameras.length > 1 ? "grid gap-2 md:grid-cols-2" : "space-y-2"}>
               {v.cameras.map((c) => (
                 <div key={c.id} className="min-w-0 rounded border border-border p-2">
                   {/* The text wraps, the button never does: every camera's button sits in the same right-hand column. */}
