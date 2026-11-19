@@ -56,7 +56,8 @@ describe("purchase incident detail", () => {
   it("shows why, loads a camera's clip only on click, and chats with the till record", async () => {
     await act(async () => { root.render(<IncidentDetail incident={INCIDENT} onClose={() => {}} />); });
     const text = document.body.textContent ?? "";
-    expect(text).toContain("purchase 63");
+    // The title names the scenario and the time, not the till's purchase number.
+    expect(text).not.toContain("purchase 63");
     expect(text).toContain("Cola 0,33 l Flasche");
     expect(text).toContain("not explained");
     expect(text).toContain("rule 1: scanned");

@@ -53,7 +53,6 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
               {incident.severity}
             </span>
             <span>{v.scenarioName}</span>
-            <span className="font-mono text-sm">purchase {v.purchaseId}</span>
             <span className="text-xs text-muted-foreground">{new Date(v.closedAt).toLocaleString()}</span>
           </DialogTitle>
         </DialogHeader>
