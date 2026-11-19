@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   judgePurchase,
+  recordedCameraIds,
   bookedCount,
   purchasesFromEvents,
   purchaseWindow,
@@ -422,5 +423,18 @@ describe("rule 2: leaving the picture counts as carrying away", () => {
     const v = judgePurchase(p, [hint("overhead-cam", "00:07:29Z", "Yes - A green bottle is moved by the person to their right side and then out of frame.")], CFG);
     expect(v.incident).toBe(false);
     expect(v.hints[0].outcome).toBe("paid");
+  });
+});
+
+describe("recordedCameraIds", () => {
+  it("names the cameras of enabled multi-camera scenarios that are judged from the recording", () => {
+    const cams = [{ id: "a" }, { id: "b" }];
+    expect([
+      ...recordedCameraIds([
+        { mode: "multi", evidence: "recording", cameras: cams, enabled: true },
+        { mode: "multi", cameras: [{ id: "live" }], enabled: true },
+        { mode: "multi", evidence: "recording", cameras: [{ id: "off" }], enabled: false },
+      ]),
+    ]).toEqual(["a", "b"]);
   });
 });

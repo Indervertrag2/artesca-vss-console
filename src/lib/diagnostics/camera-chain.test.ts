@@ -98,3 +98,24 @@ describe("buildCameraChain", () => {
     expect(chain.verdict).toBeUndefined();
   });
 });
+
+describe("a camera judged from the recording of each purchase", () => {
+  it("is analyzed without a live rule, and says by which scenario", () => {
+    const chain = base({
+      rules: [],
+      scenarios: [{ id: "self-checkout", enabled: true, sensorFilter: "cam-a", recordedCameras: ["cam-a"] }],
+    });
+    const rule = chain.steps.find((s) => s.id === "rule");
+    expect(rule).toMatchObject({ state: "ok" });
+    expect(rule?.detail).toContain("after each purchase");
+    expect(chain.verdict).toBeUndefined();
+  });
+
+  it("still fails without a rule when that scenario is switched off", () => {
+    const chain = base({
+      rules: [],
+      scenarios: [{ id: "self-checkout", enabled: false, sensorFilter: "cam-a", recordedCameras: ["cam-a"] }],
+    });
+    expect(chain.steps.find((s) => s.id === "rule")?.state).toBe("fail");
+  });
+});

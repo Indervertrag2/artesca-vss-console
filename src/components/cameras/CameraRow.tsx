@@ -97,7 +97,18 @@ function RecordingBadge({
 
 /** Badge showing whether the VLM is ingesting this camera (active realtime
  *  rule → incidents), vs registered but not analyzed, vs unknown. */
-function IngestionBadge({ vstIngesting }: { vstIngesting: boolean | undefined }) {
+function IngestionBadge({ vstIngesting, fromRecording }: { vstIngesting: boolean | undefined; fromRecording?: boolean }) {
+  if (fromRecording && !vstIngesting) {
+    return (
+      <Badge
+        variant="outline"
+        className="text-[10px] px-1.5 py-0 bg-indigo-50 border-indigo-200 text-indigo-700"
+        title="A multi-camera scenario judges this camera after each purchase, from the recording of the purchase. It needs no live rule."
+      >
+        ● VLM per purchase
+      </Badge>
+    );
+  }
   if (vstIngesting === undefined) {
     return (
       <Badge
@@ -356,7 +367,7 @@ export function CameraRow({ camera, eip, promptSets, chain }: CameraRowProps) {
               vstRegistered={camera.feeds[0]?.vstRegistered ?? false}
               vstRecoveryState={camera.feeds[0]?.vstRecoveryState}
             />
-            <IngestionBadge vstIngesting={camera.feeds[0]?.vstIngesting} />
+            <IngestionBadge vstIngesting={camera.feeds[0]?.vstIngesting} fromRecording={camera.feeds[0]?.vlmFromRecording} />
           </div>
           {/* The badges above say WHAT the state is; this says WHY, so a red
               chip is actionable without reading pod logs. */}

@@ -63,6 +63,9 @@ export interface ScenarioBinding {
   enabled: boolean;
   /** Comma-separated sensor names, empty string = all cameras. */
   sensorFilter: string;
+  /** Cameras this scenario judges from the recording of each purchase (a multi-camera
+   *  scenario with evidence "recording"): analyzed without a live rule. */
+  recordedCameras?: string[];
 }
 
 /** Cameras a scenario targets. An empty filter means "every camera". */
@@ -172,7 +175,15 @@ export function buildCameraChain(input: {
 
   // 5. VLM rule — present, unique, and naming a model the VLM actually serves.
   const mine = rules.filter((r) => r.sensor_name === camera.id);
-  if (mine.length === 0) {
+  const perPurchase = scenarios.find((s) => s.enabled && s.recordedCameras?.includes(camera.id));
+  if (mine.length === 0 && perPurchase) {
+    steps.push({
+      id: "rule",
+      label: "VLM analysis",
+      state: "ok",
+      detail: `analyzed after each purchase, from its recording (scenario ${perPurchase.id})`,
+    });
+  } else if (mine.length === 0) {
     steps.push({
       id: "rule",
       label: "VLM analysis rule",

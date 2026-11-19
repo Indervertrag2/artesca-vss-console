@@ -17,6 +17,7 @@ export function buildK8sCamerasResponse(
   recordingByName?: Map<string, boolean | undefined>,
   ingestingNames?: Set<string>,
   recoveryByName?: Map<string, "recovering" | "degraded">,
+  recordedNames?: Set<string>,
 ): K8sCamerasResponse {
   const registered = new Set(liveSensorNames);
   const cameras = desired.map((c) => {
@@ -30,6 +31,7 @@ export function buildK8sCamerasResponse(
       vstRecording: recordingByName?.get(c.id),
       vstIngesting: ingestingNames ? ingestingNames.has(c.id) : undefined,
       vstRecoveryState: recoveryByName?.get(c.id),
+      ...(recordedNames?.has(c.id) ? { vlmFromRecording: true } : {}),
     };
     const cam: Camera & { gcsPersisted?: boolean } = {
       id: c.id,

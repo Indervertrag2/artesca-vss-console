@@ -27,6 +27,8 @@ const time = (t: string) => new Date(t).toLocaleTimeString(undefined, { hour: "2
 
 /** Clips further apart than this are pulled together; below it a seek would only stutter. */
 const SYNC_SLACK_S = 0.3;
+/** Up to this many cameras, the clips of an incident are open when it is opened. */
+const OPEN_AT_ONCE = 4;
 
 interface Props {
   incident: Incident;
@@ -35,7 +37,11 @@ interface Props {
 }
 
 export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props) {
-  const [open, setOpen] = useState<Set<string>>(new Set());
+  // The clips are open from the start, so they can be watched together at once.
+  // A scenario with many cameras opens none: every clip is a download of its own.
+  const [open, setOpen] = useState<Set<string>>(
+    () => new Set(v.cameras.length <= OPEN_AT_ONCE ? v.cameras.map((c) => c.id) : []),
+  );
   // State, not a ref: the dialog mounts its content after this component's first
   // effect, and the listeners below have to attach when the element arrives.
   const [clips, setClips] = useState<HTMLDivElement | null>(null);
@@ -164,6 +170,13 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
             </div>
           </section>
 
+          <Button asChild variant="outline" size="sm" className="h-7 px-2 text-[11px]">
+            <Link href={incidentChatHref(incident.sensorId, w.start, w.end, purchaseChatQuestion(v))}>
+              <MessageSquare className="mr-1.5 h-3 w-3" />
+              Chat about this incident
+            </Link>
+          </Button>
+
           <section className="space-y-3">
             <h3 className="text-xs font-medium uppercase text-muted-foreground">Why</h3>
             {asked && (
@@ -215,12 +228,6 @@ export function PurchaseIncidentDetail({ incident, verdict: v, onClose }: Props)
             </div>
           </section>
 
-          <Button asChild variant="outline" size="sm" className="h-7 px-2 text-[11px]">
-            <Link href={incidentChatHref(incident.sensorId, w.start, w.end, purchaseChatQuestion(v))}>
-              <MessageSquare className="mr-1.5 h-3 w-3" />
-              Chat about this incident
-            </Link>
-          </Button>
         </div>
       </DialogContent>
     </Dialog>

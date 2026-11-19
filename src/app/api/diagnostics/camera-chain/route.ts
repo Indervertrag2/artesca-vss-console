@@ -29,6 +29,7 @@ export async function GET() {
       id: s.id,
       enabled: s.enabled !== false,
       sensorFilter: s.sensor_filter ?? "",
+      ...(s.mode === "multi" && s.evidence === "recording" ? { recordedCameras: (s.cameras ?? []).map((c) => c.id) } : {}),
     }));
   } catch (err) {
     // No desired list = nothing to diagnose against. Report it rather than

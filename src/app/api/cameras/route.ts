@@ -64,8 +64,10 @@ export async function GET() {
   const { getRecoveryStates } = await import("@/lib/reconcile/recording-recovery");
   try {
     const ctx = await makeReconcileContext();
-    const [desired, vstResult, mtxResult, status, ingestResult] = await Promise.all([
+    const [desired, scenarios, vstResult, mtxResult, status, ingestResult] = await Promise.all([
       ctx.store.readCameras(ctx.instance),
+      // Never the reason the camera list is empty: a store without scenarios reads as none.
+      Promise.resolve().then(() => ctx.store.readScenarios(ctx.instance)).catch(() => []),
       vstListSensors(),
       mediamtxListPaths().catch(() => ({ paths: [] as { name: string; ready: boolean }[], warning: undefined })),
       ctx.store.readStatus(ctx.instance).catch(() => null),
@@ -88,7 +90,10 @@ export async function GET() {
     // Guarded auto-heal state from the reconcile loop's recording-recovery
     // pass — pure in-memory read, no I/O.
     const recoveryByName = getRecoveryStates();
-    const { cameras, reconcile } = buildK8sCamerasResponse(desired, liveNames, mtxReady, status, recordingByName, ingestingNames, recoveryByName);
+    // Cameras a multi-camera scenario judges from the recording of each purchase:
+    // analyzed, though no live rule names them.
+    const { recordedCameraIds } = await import("@/lib/purchase-judge");
+    const { cameras, reconcile } = buildK8sCamerasResponse(desired, liveNames, mtxReady, status, recordingByName, ingestingNames, recoveryByName, recordedCameraIds(scenarios));
     return NextResponse.json({ cameras, eip: "", gcs: { available: false }, reconcile, warnings });
   } catch (err) {
     const msg = err instanceof ReconcileContextError ? err.message : String(err);

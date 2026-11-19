@@ -61,16 +61,20 @@ describe("purchase incident detail", () => {
     expect(text).toContain("Cola 0,33 l Flasche");
     expect(text).toContain("not explained");
     expect(text).toContain("rule 1: scanned");
-    expect(document.querySelectorAll('[data-testid="clip"]')).toHaveLength(0);
-
-    const open = [...document.body.querySelectorAll("button")].filter((b) => b.textContent?.includes("Open clip"));
-    expect(open).toHaveLength(2);
-    await act(async () => { open[1].click(); });
+    // With two cameras both clips are open from the start, each from its own camera's recording.
     const clips = document.querySelectorAll('[data-testid="clip"]');
-    expect(clips).toHaveLength(1);
-    expect(clips[0].getAttribute("data-src")).toBe(
+    expect(clips).toHaveLength(2);
+    expect(clips[1].getAttribute("data-src")).toBe(
       `/api/clips/scanner-cam/${encodeURIComponent(verdict.window!.start)}/index.m3u8?end=${encodeURIComponent(verdict.window!.end)}`,
     );
+    // A clip can still be closed on its own.
+    const close = [...document.body.querySelectorAll("button")].filter((b) => b.textContent?.includes("Close clip"));
+    expect(close).toHaveLength(2);
+    await act(async () => { close[0].click(); });
+    expect(document.querySelectorAll('[data-testid="clip"]')).toHaveLength(1);
+    // The chat comes before the why.
+    const body = document.body.textContent ?? "";
+    expect(body.indexOf("Chat about this incident")).toBeLessThan(body.indexOf("Why"));
 
     const chat = [...document.body.querySelectorAll("a")].find((a) => a.textContent?.includes("Chat about this incident"))!;
     const q = new URL(chat.getAttribute("href")!, "http://console").searchParams;

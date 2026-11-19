@@ -28,6 +28,7 @@ export const FeedSchema = z.object({
   replayReady: z.boolean(),
   vstRecording: z.boolean().optional(),
   vstIngesting: z.boolean().optional(),
+  vlmFromRecording: z.boolean().optional(),
   vstRecoveryState: z.enum(["recovering", "degraded"]).optional(),
   bitrateMbps: z.number().positive().optional(),
   fps: z.number().positive().optional(),

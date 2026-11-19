@@ -97,6 +97,16 @@ export function multiFields(s: ScenarioMulti): ScenarioMulti {
   };
 }
 
+/** Cameras of enabled multi-camera scenarios that are judged from the recording of a
+ *  purchase: the model looks at them after each purchase, without a live rule. */
+export function recordedCameraIds(scenarios: (ScenarioMulti & { enabled?: boolean })[]): Set<string> {
+  return new Set(
+    scenarios
+      .filter((s) => s.enabled !== false && s.mode === "multi" && s.evidence === "recording")
+      .flatMap((s) => (s.cameras ?? []).map((c) => c.id)),
+  );
+}
+
 export const DEFAULT_RULES: PurchaseRules = { matchToleranceS: 3, windowBeforeS: 30, windowAfterS: 20 };
 
 /**

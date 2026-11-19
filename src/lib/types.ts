@@ -54,6 +54,9 @@ export interface Feed {
    *  the VLM is analyzing this stream and emitting incidents. undefined =
    *  unknown (alert-bridge unreachable). */
   vstIngesting?: boolean;
+  /** A multi-camera scenario judges this camera from the recording of each purchase:
+   *  the VLM analyzes it after a purchase, without a live rule. */
+  vlmFromRecording?: boolean;
   /** Guarded auto-heal state from the recording-recovery reconcile pass:
    *  "recovering" = a re-arm has been attempted and the sensor hasn't yet
    *  been given up on; "degraded" = re-arm attempts exhausted, still not
